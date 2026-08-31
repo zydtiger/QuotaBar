@@ -2,6 +2,14 @@ import XCTest
 @testable import QuotaBar
 
 final class QuotaBarTests: XCTestCase {
+    func testTokenTextUsesBillionsForLargeTotals() {
+        XCTAssertEqual(Double(321_000_000).tokenText, "321.0M")
+        XCTAssertEqual(Double(999_900_000).tokenText, "999.9M")
+        XCTAssertEqual(Double(1_000_000_000).tokenText, "1.0B")
+        XCTAssertEqual(Double(3_831_000_000).tokenText, "3.8B")
+        XCTAssertEqual(Double(42_714_300_000).tokenText, "42.7B")
+    }
+
     func testTotalsRespectConfiguredDayBoundary() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/New_York")!

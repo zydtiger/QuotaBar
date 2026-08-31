@@ -30,6 +30,9 @@ Each provider card contains connection health, every quota window returned by
 the provider, and Today, 7 days, and Lifetime tokens. Disabled providers are
 fully removed and excluded from the aggregate.
 
+Token totals use compact `K`, `M`, and `B` units; values at or above one
+billion use `B` so large account totals do not widen or crowd the cards.
+
 Codex quota rows are data-driven. ZCode recognizes 5-hour and weekly pools;
 MCP quota appears independently only when the provider reports an MCP limit.
 Quota pools are never part of token totals.

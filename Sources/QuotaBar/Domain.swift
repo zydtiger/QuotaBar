@@ -291,6 +291,7 @@ enum ProviderError: Error, Sendable, Equatable {
 
 extension Double {
     var tokenText: String {
+        if self >= 1_000_000_000 { return String(format: "%.1fB", self / 1_000_000_000) }
         if self >= 1_000_000 { return String(format: "%.1fM", self / 1_000_000) }
         if self >= 1_000 { return String(format: "%.1fK", self / 1_000) }
         return String(format: "%.0f", self)
