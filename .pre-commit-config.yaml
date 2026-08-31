@@ -1,0 +1,34 @@
+minimum_prek_version: "0.4.14"
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
+default_stages: [pre-commit]
+
+repos:
+  - repo: builtin
+    hooks:
+      - id: check-added-large-files
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+      - id: require-pattern
+        name: commit subject
+        stages: [commit-msg]
+        args: ['^(Merge .+|(feat|fix|docs|refactor|test|build|ci|chore|revert): [a-z](?:[^.\r\n]*[^.\r\n])?)$']
+
+  - repo: local
+    hooks:
+      - id: xcode-tests
+        name: generate Xcode project and run tests
+        entry: /bin/sh -c 'xcodegen generate && xcodebuild -project QuotaBar.xcodeproj -scheme QuotaBar -configuration Debug -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO test && git diff --exit-code -- QuotaBar.xcodeproj'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
+    hooks:
+      - id: actionlint
+        args: [-shellcheck=, -pyflakes=]
