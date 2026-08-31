@@ -415,7 +415,8 @@ private func parseCodexWindows(_ result: [String: AnySendable]) throws -> [Quota
             guard let raw = value as? [String: Any], !raw.isEmpty,
                   let used = number(in: raw, keys: ["usedPercent"]) else { throw ProviderError.malformedResponse }
             let duration = number(in: raw, keys: ["windowDurationMins"])
-            let name = label ?? codexWindowName(key: key, duration: duration)
+            let windowName = codexWindowName(key: key, duration: duration)
+            let name = label.map { "\($0) · \(windowName)" } ?? windowName
             let reset = number(in: raw, keys: ["resetsAt"]).map(Date.init(timeIntervalSince1970:))
             windows.append(QuotaWindow(id: "codex-\(item.id)-\(key)", name: name, used: used, limit: 100, resetAt: reset, unit: "% used"))
         }

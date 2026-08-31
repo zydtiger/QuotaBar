@@ -518,7 +518,12 @@ final class QuotaBarTests: XCTestCase {
     func testCodexParsesDistinctLegacyAndLimitIDBuckets() async throws {
         let result = try await CodexProvider(transport: MultiBucketCodexTransport()).refresh(now: .now, calendar: .current)
         XCTAssertEqual(result.quotaWindows.count, 4)
-        XCTAssertEqual(Set(result.quotaWindows.map(\.name)), ["Plan", "Secondary plan"])
+        XCTAssertEqual(result.quotaWindows.map(\.name), [
+            "Plan · 5-hour",
+            "Secondary plan · 5-hour",
+            "Secondary plan · Weekly",
+            "Secondary plan · 43200-minute tertiary"
+        ])
         XCTAssertEqual(Set(result.quotaWindows.map(\.id)).count, 4)
         XCTAssertEqual(result.quotaWindows.map(\.id), ["codex-plan-primary", "codex-secondary-primary", "codex-secondary-secondary", "codex-secondary-tertiary"])
     }
