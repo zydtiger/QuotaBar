@@ -26,10 +26,12 @@ jobs:
           persist-credentials: false
 
       - name: Install repository tooling
-        run: brew install prek xcodegen
+        run: brew install xcodegen
 
       - name: Run file checks
-        run: prek run --all-files
+        uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+        with:
+          prek-version: 0.4.14
 
       - name: Run pre-push checks
         run: prek run --hook-stage pre-push --all-files
