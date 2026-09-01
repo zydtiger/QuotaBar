@@ -1,4 +1,88 @@
+import AppKit
 import SwiftUI
+
+enum ApplicationActions {
+    @MainActor
+    static func quit(terminate: () -> Void = { NSApplication.shared.terminate(nil) }) {
+        terminate()
+    }
+}
+
+@MainActor
+enum SettingsPresenter {
+    static let windowIdentifier = NSUserInterfaceItemIdentifier("com_apple_SwiftUI_Settings_window")
+
+    static func show(
+        openSettings: () -> Void,
+        application: NSApplication = .shared
+    ) {
+        application.activate(ignoringOtherApps: true)
+        openSettings()
+        focusSettingsWindow(in: application)
+        Task { @MainActor in
+            await Task.yield()
+            focusSettingsWindow(in: application)
+            try? await Task.sleep(for: .milliseconds(150))
+            focusSettingsWindow(in: application)
+        }
+    }
+
+    static func settingsWindow(in windows: [NSWindow]) -> NSWindow? {
+        windows.first { $0.identifier == windowIdentifier }
+    }
+
+    private static func focusSettingsWindow(in application: NSApplication) {
+        application.activate(ignoringOtherApps: true)
+        settingsWindow(in: application.windows)?.makeKeyAndOrderFront(nil)
+    }
+}
+
+@MainActor
+enum ScrollbarAppearance {
+    static let insets = NSEdgeInsets(top: 16, left: 0, bottom: 16, right: 1)
+
+    static func apply(to scrollView: NSScrollView) {
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerInsets = insets
+        scrollView.verticalScroller?.controlSize = .mini
+    }
+}
+
+enum SevenDayChartLayout {
+    static let barWidth: CGFloat = 7
+    static let providerSpacing: CGFloat = 2
+    static let daySpacing: CGFloat = 12
+
+    static func cornerRadius(for height: CGFloat) -> CGFloat {
+        min(2, height * 0.2)
+    }
+}
+
+private struct OverlayScrollerConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        configure(view)
+    }
+
+    private func configure(_ view: NSView) {
+        DispatchQueue.main.async {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let scrollView = current as? NSScrollView {
+                    ScrollbarAppearance.apply(to: scrollView)
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
+    }
+}
 
 struct MenuPanel: View {
     @ObservedObject var model: UsageViewModel
@@ -14,7 +98,10 @@ struct MenuPanel: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Settings") { openSettings() }.buttonStyle(.borderless)
+                    Button("Settings") {
+                        SettingsPresenter.show { openSettings() }
+                    }
+                    .buttonStyle(.borderless)
                 }
                 TotalsRow(totals: model.aggregate, title: "Enabled providers")
                 ForEach(ProviderID.allCases) { provider in
@@ -27,9 +114,12 @@ struct MenuPanel: View {
                     if model.preferences.codexEnabled { Text("● Codex").foregroundStyle(.blue) }
                     if model.preferences.zcodeEnabled { Text("● ZCode").foregroundStyle(.orange) }
                     Spacer()
+                    Button("Quit QuotaBar") { ApplicationActions.quit() }
                     Button("Refresh") { Task { await model.refresh() } }.disabled(model.isRefreshing)
                 }.font(.caption)
-            }.padding(16)
+            }
+            .padding(16)
+            .background(OverlayScrollerConfigurator())
         }.frame(width: 380, height: 620).task { await model.panelOpened() }
     }
 }
@@ -107,14 +197,19 @@ private struct SevenDayChart: View {
             Text("7-day provider tokens").font(.caption).foregroundStyle(.secondary)
             GeometryReader { proxy in
                 let maximum = max(1, snapshots.flatMap(\.dailyUsage).map(\.tokens).max() ?? 1)
-                HStack(alignment: .bottom, spacing: 3) {
+                HStack(alignment: .bottom, spacing: SevenDayChartLayout.daySpacing) {
                     ForEach(0..<7, id: \.self) { index in
                         let date = calendar.date(byAdding: .day, value: index - 6, to: calendar.startOfDay(for: .now))!
-                        HStack(alignment: .bottom, spacing: 1) {
+                        HStack(alignment: .bottom, spacing: SevenDayChartLayout.providerSpacing) {
                             ForEach(snapshots, id: \.provider) { snapshot in
                                 let value = UsageMath.tokens(for: snapshot, on: date, calendar: calendar)
-                                Capsule().fill(snapshot.provider == .codex ? Color.blue : Color.orange)
-                                    .frame(maxWidth: .infinity, minHeight: 2, maxHeight: max(2, proxy.size.height * value / maximum))
+                                let height = max(2, proxy.size.height * value / maximum)
+                                RoundedRectangle(
+                                    cornerRadius: SevenDayChartLayout.cornerRadius(for: height),
+                                    style: .continuous
+                                )
+                                    .fill(snapshot.provider == .codex ? Color.blue : Color.orange)
+                                    .frame(width: SevenDayChartLayout.barWidth, height: height)
                             }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     }

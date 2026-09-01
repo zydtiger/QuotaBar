@@ -35,6 +35,22 @@ enum CodexExecutableResolver {
     }
 }
 
+enum CodexProcessEnvironment {
+    static func addingExecutableDirectory(
+        to environment: [String: String],
+        executableURL: URL
+    ) -> [String: String] {
+        var environment = environment
+        let directory = executableURL.deletingLastPathComponent().path
+        let path = environment["PATH", default: ""]
+        let components = path.split(separator: ":").map(String.init)
+        if !components.contains(directory) {
+            environment["PATH"] = ([directory] + components).joined(separator: ":")
+        }
+        return environment
+    }
+}
+
 actor CodexAppServerTransport: CodexRPCTransport, CodexRateLimitNotifying {
     private struct Pending {
         let continuation: CheckedContinuation<[String: AnySendable], Error>
@@ -104,6 +120,10 @@ actor CodexAppServerTransport: CodexRPCTransport, CodexRateLimitNotifying {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["app-server", "--stdio"]
+        process.environment = CodexProcessEnvironment.addingExecutableDirectory(
+            to: ProcessInfo.processInfo.environment,
+            executableURL: executable
+        )
         let stdin = Pipe()
         let stdout = Pipe()
         process.standardInput = stdin
@@ -404,7 +424,10 @@ private func parseCodexWindows(_ result: [String: AnySendable]) throws -> [Quota
     return try snapshots.flatMap { item in
         let label = (item.snapshot["limitName"] as? String) ?? (item.snapshot["limitId"] as? String)
         let preferredKeys = ["primary", "secondary"]
-        let metadataKeys: Set<String> = ["credits", "individualLimit", "limitId", "limitName"]
+        let metadataKeys: Set<String> = [
+            "credits", "individualLimit", "limitId", "limitName", "planType",
+            "rateLimitReachedType", "spendControlReached"
+        ]
         let otherKeys = item.snapshot.keys
             .filter { !preferredKeys.contains($0) && !metadataKeys.contains($0) }
             .sorted()
@@ -412,6 +435,7 @@ private func parseCodexWindows(_ result: [String: AnySendable]) throws -> [Quota
         var windows: [QuotaWindow] = []
         for key in keys {
             guard let value = item.snapshot[key] else { continue }
+            if value is NSNull { continue }
             guard let raw = value as? [String: Any], !raw.isEmpty,
                   let used = number(in: raw, keys: ["usedPercent"]) else { throw ProviderError.malformedResponse }
             let duration = number(in: raw, keys: ["windowDurationMins"])
@@ -435,7 +459,8 @@ private func parseZCodeUsage(_ data: Data) throws -> [DailyUsage] {
     let payload = try zcodeDataEnvelope(data)
     guard let times = payload["x_time"] as? [String], let usages = payload["tokensUsage"] as? [Any], times.count == usages.count else { throw ProviderError.malformedResponse }
     return try zip(times, usages).map { time, rawUsage in
-        guard let timestamp = DateFormatter.zcodeHour.date(from: time), let tokens = numeric(rawUsage) else { throw ProviderError.malformedResponse }
+        guard let timestamp = DateFormatter.zcodeHour.date(from: time) ?? DateFormatter.yyyyMMdd.date(from: time),
+              let tokens = numeric(rawUsage) else { throw ProviderError.malformedResponse }
         return DailyUsage(day: timestamp, tokens: tokens)
     }
 }
@@ -448,8 +473,7 @@ private func parseZCodeQuotas(_ data: Data) throws -> [QuotaWindow] {
               let unitValue = number(in: item, keys: ["unit"]),
               let numberRaw = number(in: item, keys: ["number"]),
               let used = number(in: item, keys: ["currentValue"]),
-              let limit = number(in: item, keys: ["usage"]), limit > 0,
-              let resetRaw = number(in: item, keys: ["nextResetTime"]) else { throw ProviderError.malformedResponse }
+              let limit = number(in: item, keys: ["usage"]), limit > 0 else { throw ProviderError.malformedResponse }
         let unit = Int(unitValue)
         let numberValue = Int(numberRaw)
         let isMCP = type.localizedCaseInsensitiveContains("mcp")
@@ -458,7 +482,9 @@ private func parseZCodeQuotas(_ data: Data) throws -> [QuotaWindow] {
         else if unit == 6 && numberValue == 1 { name = "Weekly" }
         else if isMCP { name = (item["name"] as? String) ?? "MCP" }
         else { name = (item["name"] as? String) ?? "ZCode quota \(index + 1)" }
-        return QuotaWindow(id: "zcode-\(index)-\(name)", name: name, used: used, limit: limit, resetAt: Date(timeIntervalSince1970: resetRaw / 1_000), unit: isMCP ? "MCP calls" : "quota")
+        let resetAt = number(in: item, keys: ["nextResetTime"])
+            .map { Date(timeIntervalSince1970: $0 / 1_000) }
+        return QuotaWindow(id: "zcode-\(index)-\(name)", name: name, used: used, limit: limit, resetAt: resetAt, unit: isMCP ? "MCP calls" : "quota")
     }
 }
 

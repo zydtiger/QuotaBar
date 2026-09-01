@@ -24,7 +24,7 @@ top to bottom it contains:
 3. Codex provider card.
 4. ZCode provider card.
 5. Paired seven-day provider token chart.
-6. Provider legend and manual refresh.
+6. Provider legend, explicit Quit QuotaBar action, and manual refresh.
 
 Each provider card contains connection health, every quota window returned by
 the provider, and Today, 7 days, and Lifetime tokens. Disabled providers are

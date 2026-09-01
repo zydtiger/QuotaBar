@@ -2,6 +2,51 @@ import XCTest
 @testable import QuotaBar
 
 final class QuotaBarTests: XCTestCase {
+    func testSettingsPresenterFindsSwiftUISettingsWindow() async {
+        await MainActor.run {
+            let otherWindow = NSWindow()
+            let settingsWindow = NSWindow()
+            settingsWindow.identifier = SettingsPresenter.windowIdentifier
+
+            XCTAssertIdentical(
+                SettingsPresenter.settingsWindow(in: [otherWindow, settingsWindow]),
+                settingsWindow
+            )
+        }
+    }
+
+    func testPanelScrollbarUsesCompactOverlayStyle() async {
+        await MainActor.run {
+            let scrollView = NSScrollView()
+            scrollView.hasVerticalScroller = true
+
+            ScrollbarAppearance.apply(to: scrollView)
+
+            XCTAssertEqual(scrollView.scrollerStyle, .overlay)
+            XCTAssertTrue(scrollView.autohidesScrollers)
+            XCTAssertEqual(scrollView.scrollerInsets.top, 16)
+            XCTAssertEqual(scrollView.scrollerInsets.bottom, 16)
+            XCTAssertEqual(scrollView.scrollerInsets.right, 1)
+            XCTAssertEqual(scrollView.verticalScroller?.controlSize, .mini)
+        }
+    }
+
+    func testSevenDayChartUsesSubtleRadiusForShortBars() {
+        XCTAssertEqual(SevenDayChartLayout.cornerRadius(for: 2), 0.4, accuracy: 0.001)
+        XCTAssertEqual(SevenDayChartLayout.cornerRadius(for: 5), 1, accuracy: 0.001)
+        XCTAssertEqual(SevenDayChartLayout.cornerRadius(for: 20), 2, accuracy: 0.001)
+    }
+
+    func testQuitActionInvokesTerminationHandler() async {
+        let didTerminate = await MainActor.run {
+            var didTerminate = false
+            ApplicationActions.quit { didTerminate = true }
+            return didTerminate
+        }
+
+        XCTAssertTrue(didTerminate)
+    }
+
     func testTokenTextUsesBillionsForLargeTotals() {
         XCTAssertEqual(Double(321_000_000).tokenText, "321.0M")
         XCTAssertEqual(Double(999_900_000).tokenText, "999.9M")
@@ -528,11 +573,37 @@ final class QuotaBarTests: XCTestCase {
         XCTAssertEqual(result.quotaWindows.map(\.id), ["codex-plan-primary", "codex-secondary-primary", "codex-secondary-secondary", "codex-secondary-tertiary"])
     }
 
+    func testCodexSkipsNullOptionalWindowAndKeepsSparkWindows() async throws {
+        let result = try await CodexProvider(transport: LiveShapeCodexTransport()).refresh(now: .now, calendar: .current)
+
+        XCTAssertEqual(result.quotaWindows.map(\.name), [
+            "codex · Weekly",
+            "GPT-5.3-Codex-Spark · 5-hour",
+            "GPT-5.3-Codex-Spark · Weekly"
+        ])
+    }
+
     func testCodexExecutableResolverUsesExplicitThenPathThenKnownLocations() {
         let executable: (URL) -> Bool = { ["/custom/codex", "/bin/codex", "/opt/homebrew/bin/codex"].contains($0.path) }
         XCTAssertEqual(CodexExecutableResolver.resolve(explicit: URL(fileURLWithPath: "/custom/codex"), path: nil, isExecutable: executable)?.path, "/custom/codex")
         XCTAssertEqual(CodexExecutableResolver.resolve(path: "/missing:/bin", isExecutable: executable)?.path, "/bin/codex")
         XCTAssertEqual(CodexExecutableResolver.resolve(path: "/missing", isExecutable: executable)?.path, "/opt/homebrew/bin/codex")
+    }
+
+    func testCodexProcessEnvironmentMakesHomebrewNodeDiscoverable() {
+        let environment = CodexProcessEnvironment.addingExecutableDirectory(
+            to: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"],
+            executableURL: URL(fileURLWithPath: "/opt/homebrew/bin/codex")
+        )
+
+        XCTAssertEqual(environment["PATH"], "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        XCTAssertEqual(
+            CodexProcessEnvironment.addingExecutableDirectory(
+                to: environment,
+                executableURL: URL(fileURLWithPath: "/opt/homebrew/bin/codex")
+            )["PATH"],
+            environment["PATH"]
+        )
     }
 
     func testCodexRateLimitNotificationYieldsSignal() async {
@@ -563,6 +634,17 @@ final class QuotaBarTests: XCTestCase {
         XCTAssertEqual(queries.count, 1)
         XCTAssertEqual(queries.first?.0, "2025-01-01 00:00:00")
         XCTAssertEqual(queries.first?.1, "2025-01-31 23:59:59")
+    }
+
+    func testZCodeAcceptsDailyUsageAndQuotaWithoutResetTime() async throws {
+        let provider = ZCodeProvider(store: InMemoryUsageStore(), credentials: FixedCredential(), http: LiveShapeZCodeHTTP())
+        let result = try await provider.refresh(now: date("2025-01-02T00:00:00Z"), calendar: .current)
+
+        XCTAssertEqual(result.lifetimeTokens, 30)
+        XCTAssertEqual(result.dailyUsage.map(\.day), [date("2025-01-01T00:00:00Z"), date("2025-01-02T00:00:00Z")])
+        XCTAssertEqual(result.quotaWindows.map(\.name), ["5-hour", "Weekly"])
+        XCTAssertNil(result.quotaWindows[0].resetAt)
+        XCTAssertNotNil(result.quotaWindows[1].resetAt)
     }
 
     func testZCodeCredentialDiscoveryAcceptsOnlyEnabledCodingPlanConfig() async throws {
@@ -678,6 +760,35 @@ private actor MultiBucketCodexTransport: CodexRPCTransport {
     }
 }
 
+private actor LiveShapeCodexTransport: CodexRPCTransport {
+    func request(method: String, params: [String: AnySendable]?) throws -> [String: AnySendable] {
+        if method == "account/usage/read" {
+            return ["summary": AnySendable(["lifetimeTokens": Int64(1)]), "dailyUsageBuckets": AnySendable([])]
+        }
+        let codex: [String: Any] = [
+            "limitId": "codex",
+            "primary": ["usedPercent": 22, "windowDurationMins": 10_080],
+            "secondary": NSNull(),
+            "planType": "pro",
+            "rateLimitReachedType": NSNull(),
+            "spendControlReached": false
+        ]
+        let spark: [String: Any] = [
+            "limitId": "codex_bengalfox",
+            "limitName": "GPT-5.3-Codex-Spark",
+            "primary": ["usedPercent": 0, "windowDurationMins": 300],
+            "secondary": ["usedPercent": 0, "windowDurationMins": 10_080],
+            "planType": "pro",
+            "rateLimitReachedType": NSNull(),
+            "spendControlReached": NSNull()
+        ]
+        return [
+            "rateLimits": AnySendable(codex),
+            "rateLimitsByLimitId": AnySendable(["codex": codex, "codex_bengalfox": spark])
+        ]
+    }
+}
+
 private struct FixedCredential: ZCodeCredentialDiscovering {
     let baseURL: String
     init(baseURL: String = "https://plan.example.invalid/base") { self.baseURL = baseURL }
@@ -698,6 +809,21 @@ private actor ObservedZCodeHTTP: HTTPClient {
     }
 }
 
+private actor LiveShapeZCodeHTTP: HTTPClient {
+    func data(for request: URLRequest) throws -> (Data, HTTPURLResponse) {
+        let body: [String: Any]
+        if request.url!.path.contains("model-usage") {
+            body = ["code": 200, "success": true, "data": ["x_time": ["2025-01-01", "2025-01-02"], "tokensUsage": [10, 20], "granularity": "daily"]]
+        } else {
+            body = ["code": 200, "success": true, "data": ["limits": [
+                ["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "usage": 12_000, "currentValue": 0],
+                ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "usage": 60_000, "currentValue": 19_406, "nextResetTime": 1_788_279_806_998]
+            ]]]
+        }
+        return (try JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
 private actor FailureEnvelopeHTTP: HTTPClient {
     func data(for request: URLRequest) throws -> (Data, HTTPURLResponse) {
         let body: [String: Any] = ["code": 401, "success": false, "data": [:]]
@@ -709,7 +835,7 @@ private actor MalformedQuotaHTTP: HTTPClient {
     func data(for request: URLRequest) throws -> (Data, HTTPURLResponse) {
         let body: [String: Any] = request.url!.path.contains("model-usage")
             ? ["code": 200, "success": true, "data": ["x_time": ["2025-01-01 00:00"], "tokensUsage": [1]]]
-            : ["code": 200, "success": true, "data": ["limits": [["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "usage": 100, "currentValue": 25]]]]
+            : ["code": 200, "success": true, "data": ["limits": [["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "currentValue": 25]]]]
         return (try JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
