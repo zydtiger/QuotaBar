@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1BEE90065A825EFA6A54D299 /* QuotaBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB84C086A950F5214F7F5307 /* QuotaBarApp.swift */; };
+		229C41C443DC4A2C6A483D72 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = BD3A9E9CFC9A63E582D886E6 /* AppIcon.icon */; };
 		23496451014AE037414EFB1E /* QuotaBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A75A91E64C1F362986369FCF /* QuotaBarTests.swift */; };
 		2DE3CE0CD8E9D54FFFFFC8A2 /* Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DED1A4A99946B83D106D75 /* Domain.swift */; };
 		48CAACC670D4A6881C987DD7 /* UsageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2AB03CC480D9FDCB8CAF273 /* UsageViewModel.swift */; };
@@ -34,6 +35,7 @@
 		A75A91E64C1F362986369FCF /* QuotaBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaBarTests.swift; sourceTree = "<group>"; };
 		B2AB03CC480D9FDCB8CAF273 /* UsageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViewModel.swift; sourceTree = "<group>"; };
 		B9DED1A4A99946B83D106D75 /* Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain.swift; sourceTree = "<group>"; };
+		BD3A9E9CFC9A63E582D886E6 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		BF2C90FB8E8E14FB3F689EB7 /* Providers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Providers.swift; sourceTree = "<group>"; };
 		CB84C086A950F5214F7F5307 /* QuotaBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaBarApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -45,6 +47,14 @@
 				E636C7B28FDD5FA977B98544 /* QuotaBarTests */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		411F285A7CCA501E39F48515 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BD3A9E9CFC9A63E582D886E6 /* AppIcon.icon */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		86EEC0ABD1A556BC49FD78F7 /* Products */ = {
@@ -90,6 +100,7 @@
 				CB84C086A950F5214F7F5307 /* QuotaBarApp.swift */,
 				B2AB03CC480D9FDCB8CAF273 /* UsageViewModel.swift */,
 				08CE99040C0E18B942F6C9E5 /* Views.swift */,
+				411F285A7CCA501E39F48515 /* Resources */,
 			);
 			path = QuotaBar;
 			sourceTree = "<group>";
@@ -102,6 +113,7 @@
 			buildConfigurationList = 51522FC2F7E1BA7C059510A2 /* Build configuration list for PBXNativeTarget "QuotaBar" */;
 			buildPhases = (
 				C301063859D260F7D2CF12F1 /* Sources */,
+				ABE9E2866FCE50FB15F87547 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -162,6 +174,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ABE9E2866FCE50FB15F87547 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				229C41C443DC4A2C6A483D72 /* AppIcon.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B96696E80859DBA1B92061EF /* Sources */ = {

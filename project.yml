@@ -16,6 +16,10 @@ targets:
     platform: macOS
     sources:
       - path: Sources/QuotaBar
+        excludes:
+          - Resources
+      - path: Sources/QuotaBar/Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zyd.quotabar
@@ -24,6 +28,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: QuotaBar
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         INFOPLIST_KEY_LSUIElement: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         ENABLE_HARDENED_RUNTIME: YES
