@@ -70,10 +70,19 @@ and no trailing period:
 Commits, branches, publication, PRs, tags, releases, deployment, and cleanup
 require their own user authorization. The publication target is the public
 GitHub repository `zydtiger/QuotaBar`; do not publish elsewhere or change its
-visibility without approval. The repository currently distributes source only:
-no tags, binary releases, signing, notarization, or deployment are configured.
-A future release requires a separately approved versioning and distribution
-contract.
+visibility without approval.
+
+QuotaBar uses semantic versions and immutable annotated `vX.Y.Z` tags. Before
+`1.0.0`, breaking changes to the menu bar UI, settings, exports, stored data, or
+provider integration behavior require a minor bump; compatible changes require
+a patch bump. `project.yml` owns `MARKETING_VERSION` and
+`CURRENT_PROJECT_VERSION`; regenerate and commit `QuotaBar.xcodeproj` after a
+version change. Publish only from a clean, synchronized `main` that passes full
+validation. Each GitHub release provides a universal macOS ZIP and records its
+SHA-256 digest in the release notes, which are the sole version history. State
+the signing and notarization status truthfully. The `v*` tag ruleset prohibits
+tag deletion, update, and non-fast-forward changes. Published release tags are
+immutable and each release requires explicit authorization.
 
 Maintain one writer at a time. Preserve unrelated user changes and never use a
 destructive Git command to discard work.

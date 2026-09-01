@@ -68,5 +68,10 @@ The generated Xcode project is checked in for convenient local use, but
 ## Distribution
 
 QuotaBar is published as source under the [MIT License](LICENSE). GitHub Actions
-validates the project on `macos-latest`. No binary release, Developer ID
-signing, notarization, or Mac App Store distribution is currently configured.
+validates the project on `macos-latest`.
+
+Versioned GitHub releases use semantic `vX.Y.Z` tags and include a universal
+macOS ZIP for macOS 15 or later. Preview binaries are ad-hoc signed and are not
+Developer ID signed or notarized, so macOS may block a downloaded build; build
+from source when Gatekeeper trust is required. Release notes state the exact
+signing status and the ZIP's SHA-256 digest.
