@@ -16,8 +16,9 @@ The MVP has two top-level surfaces and no separate dashboard window.
 
 ### Menu Bar Panel
 
-The panel is approximately 380 points wide and at most 660 points high. From
-top to bottom it contains:
+The panel is approximately 380 points wide and sizes to its content with no
+minimum height, up to 620 points high. Taller content scrolls within that limit.
+From top to bottom it contains:
 
 1. Header, account-scope status, refresh status, and Settings action.
 2. Aggregate Today, 7 days, and Lifetime.

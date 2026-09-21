@@ -87,6 +87,7 @@ private struct OverlayScrollerConfigurator: NSViewRepresentable {
 struct MenuPanel: View {
     @ObservedObject var model: UsageViewModel
     @Environment(\.openSettings) private var openSettings
+    @State private var contentHeight: CGFloat?
 
     var body: some View {
         ScrollView {
@@ -119,8 +120,17 @@ struct MenuPanel: View {
                 }.font(.caption)
             }
             .padding(16)
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.height
+            } action: { height in
+                contentHeight = height
+            }
             .background(OverlayScrollerConfigurator())
-        }.frame(width: 380, height: 620).task { await model.panelOpened() }
+        }
+        .frame(width: 380)
+        .frame(height: contentHeight.map { min($0, 620) })
+        .frame(maxHeight: 620)
+        .task { await model.panelOpened() }
     }
 }
 
