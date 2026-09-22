@@ -15,7 +15,7 @@ repos:
       - id: require-pattern
         name: commit subject
         stages: [commit-msg]
-        args: ['^(Merge .+|(feat|fix|docs|refactor|test|build|ci|chore|revert): [a-z](?:[^.\r\n]*[^.\r\n])?)$']
+        args: ['^(Merge .+|(feat|fix|docs|refactor|test|build|ci|chore|revert): [a-z](?:[^\r\n]*[^.\r\n])?)$']
 
   - repo: local
     hooks:
