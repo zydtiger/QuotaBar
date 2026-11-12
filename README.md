@@ -2,10 +2,12 @@
 
 [![CI](https://github.com/zydtiger/QuotaBar/actions/workflows/ci.yml/badge.svg)](https://github.com/zydtiger/QuotaBar/actions/workflows/ci.yml)
 
-QuotaBar is a native macOS menu bar utility for account-based Codex and ZCode
-subscription usage. It shows provider quota windows, Today, 7-day, and Lifetime
-token totals, and an enabled-provider aggregate without substituting local
-device history for account data.
+QuotaBar is a native macOS menu bar utility for Codex, ZCode, and Claude
+subscription usage. It shows provider quota windows; Today, 7-day, and Lifetime
+account token totals for Codex and ZCode with their aggregate; and Claude local
+activity (tokens and user messages per day) counted from Claude Code
+transcripts on the devices you configure. Local activity is always labelled
+with the devices it covers and never added into account totals.
 
 ## Usage and privacy
 
@@ -20,6 +22,21 @@ opt-in: the app only discovers the enabled local Coding Plan configuration in
 origin directly, and never stores or exports its credential. SQLite stores
 normalized account snapshots and sealed monthly ZCode ledger entries; it never
 stores prompts, raw responses, or local session logs.
+
+Claude quota access is also opt-in: after consent the app reads Claude Code's
+OAuth access token from the `Claude Code-credentials` Keychain item, sends it
+only to Anthropic's usage endpoint, and never refreshes, rewrites, stores, or
+exports it. If Claude Code's login has expired, the card asks you to sign in
+with Claude Code again.
+
+Claude local activity comes from activity sources managed in Settings. A source
+is a named command whose output is the `quotabar.activity` JSON schema; the
+bundled collector (`claude_activity_collector.py`, Python standard library
+only) prints counts from `~/.claude/projects` and never prompt or response
+text. The app ships with one local source. To add another machine, add a source
+whose command pipes the collector over SSH, for example
+`ssh -o BatchMode=yes -o ConnectTimeout=15 <host> python3 -`; nothing needs to
+be installed on the remote host.
 
 ## Development
 

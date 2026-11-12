@@ -95,7 +95,7 @@ struct MenuPanel: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading) {
                         Text("QuotaBar").font(.title3.weight(.semibold))
-                        Text(model.isRefreshing ? "Refreshing account usage…" : "Account-based, cross-device usage")
+                        Text(model.isRefreshing ? "Refreshing usage…" : "Account usage and local Claude activity")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -104,16 +104,29 @@ struct MenuPanel: View {
                     }
                     .buttonStyle(.borderless)
                 }
-                TotalsRow(totals: model.aggregate, title: "Enabled providers")
+                if !accountTokenProviders.isEmpty {
+                    TotalsRow(totals: model.aggregate, title: "Account tokens · " + accountTokenProviders.map(\.rawValue).joined(separator: " + "))
+                }
                 ForEach(ProviderID.allCases) { provider in
-                    if let snapshot = model.snapshots[provider], model.preferences.enabled(provider) {
-                        ProviderCard(snapshot: snapshot, totals: UsageMath.totals(for: snapshot, now: .now, calendar: model.preferences.calendar), preferences: model.preferences)
+                    // Claude's card also carries local activity, so it shows before its first account poll.
+                    if model.preferences.enabled(provider), let snapshot = model.snapshots[provider] ?? (provider == .claude ? .loading(provider) : nil) {
+                        ProviderCard(snapshot: snapshot, preferences: model.preferences) {
+                            if provider == .claude {
+                                LocalActivityTotals(model: model)
+                            } else {
+                                TotalsRow(totals: UsageMath.totals(for: snapshot, now: .now, calendar: model.preferences.calendar), title: snapshot.coverage)
+                            }
+                        } extra: {
+                            if provider == .claude { LocalActivitySection(model: model) }
+                        }
                     }
                 }
-                SevenDayChart(snapshots: model.enabledSnapshots, calendar: model.preferences.calendar)
+                if !accountTokenProviders.isEmpty {
+                    SevenDayChart(snapshots: model.enabledSnapshots.filter(\.provider.reportsAccountTokens), calendar: model.preferences.calendar)
+                }
                 HStack {
-                    if model.preferences.codexEnabled { Text("● Codex").foregroundStyle(.blue) }
-                    if model.preferences.zcodeEnabled { Text("● ZCode").foregroundStyle(.orange) }
+                    if model.preferences.codexEnabled { Text("● Codex").foregroundStyle(ProviderID.codex.tint) }
+                    if model.preferences.zcodeEnabled { Text("● ZCode").foregroundStyle(ProviderID.zcode.tint) }
                     Spacer()
                     Button("Quit QuotaBar") { ApplicationActions.quit() }
                     Button("Refresh") { Task { await model.refresh() } }.disabled(model.isRefreshing)
@@ -132,18 +145,172 @@ struct MenuPanel: View {
         .frame(maxHeight: 620)
         .task { await model.panelOpened() }
     }
+
+    private var accountTokenProviders: [ProviderID] {
+        ProviderID.allCases.filter { $0.reportsAccountTokens && model.preferences.enabled($0) }
+    }
+}
+
+extension ProviderID {
+    var tint: Color {
+        switch self {
+        case .codex: .blue
+        case .zcode: .orange
+        case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
+        }
+    }
+}
+
+extension ProviderHealth {
+    var tint: Color {
+        switch self {
+        case .fresh: .green
+        case .stale, .loading: .orange
+        case .unavailable, .authenticationRequired: .red
+        case .disabled: .secondary
+        }
+    }
+}
+
+extension UsageViewModel {
+    /// Rows of enabled activity sources, already deduplicated across devices.
+    var enabledActivityRows: [ActivityRow] {
+        enabledActivitySources.flatMap { activityRows[$0.id] ?? [] }
+    }
+
+    var enabledActivitySources: [ActivitySourceConfig] { preferences.activitySources.filter(\.enabled) }
+}
+
+/// Claude's headline: local tokens from every enabled device, in the same layout as account totals.
+private struct LocalActivityTotals: View {
+    @ObservedObject var model: UsageViewModel
+
+    var body: some View {
+        let calendar = model.preferences.calendar
+        let rows = model.enabledActivityRows
+        let tokens = ActivityMath.totals(rows, metric: ActivityMath.tokens, now: .now, calendar: calendar)
+        let today = { (component: String) in
+            ActivityMath.totals(rows, metric: ActivityMath.tokens, components: [component], now: .now, calendar: calendar).today.tokenText
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            TotalsRow(
+                title: "Local tokens · " + (model.enabledActivitySources.isEmpty ? "no devices" : model.enabledActivitySources.map(\.name).joined(separator: " + ")),
+                cells: [("Today", tokens.today), ("7 days", tokens.sevenDays), ("30 days", tokens.thirtyDays)]
+            )
+            if !model.enabledActivitySources.isEmpty {
+                Text("Input, output, and cache. Today: \(today("output")) output, \(today("cache_read")) cache read, \(today("cache_creation")) cache write.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Claude local activity details: device-counted, never an account total.
+private struct LocalActivitySection: View {
+    @ObservedObject var model: UsageViewModel
+
+    var body: some View {
+        let calendar = model.preferences.calendar
+        let rows = model.enabledActivityRows
+        let messages = ActivityMath.totals(rows, metric: ActivityMath.userMessages, now: .now, calendar: calendar)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Local activity").font(.caption.weight(.semibold))
+                Spacer()
+                Text(enabledSources.isEmpty ? "No devices" : enabledSources.map(deviceName).joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if enabledSources.isEmpty {
+                Text("Add an activity source in Settings to count Claude Code tokens and messages.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+                    GridRow {
+                        Text("")
+                        Text("Today").font(.caption2).foregroundStyle(.secondary)
+                        Text("7 days").font(.caption2).foregroundStyle(.secondary)
+                        Text("30 days").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    activityRow("User messages", messages, unit: \.countText)
+                    ForEach(extraMetrics, id: \.self) { metric in
+                        activityRow(model.activityMetrics[metric]?.label ?? metric, ActivityMath.totals(rows, metric: metric, now: .now, calendar: calendar), unit: \.tokenText)
+                    }
+                }
+                ForEach(enabledSources) { source in
+                    DeviceFreshnessRow(source: source, status: model.activityStatus[source.id])
+                }
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var enabledSources: [ActivitySourceConfig] { model.enabledActivitySources }
+
+    private var extraMetrics: [String] {
+        model.activityMetrics.keys.filter { $0 != ActivityMath.tokens && $0 != ActivityMath.userMessages }.sorted()
+    }
+
+    private func deviceName(_ source: ActivitySourceConfig) -> String {
+        model.activityStatus[source.id]?.device.map { $0 == source.name ? $0 : "\(source.name) (\($0))" } ?? source.name
+    }
+
+    private func activityRow(_ label: String, _ totals: ActivityTotals, unit: KeyPath<Double, String>) -> some View {
+        GridRow {
+            Text(label).font(.caption)
+            Text(totals.today[keyPath: unit]).font(.callout.monospacedDigit().weight(.semibold))
+            Text(totals.sevenDays[keyPath: unit]).font(.callout.monospacedDigit())
+            Text(totals.thirtyDays[keyPath: unit]).font(.callout.monospacedDigit())
+        }
+    }
+}
+
+private struct DeviceFreshnessRow: View {
+    let source: ActivitySourceConfig
+    let status: ActivitySourceStatus?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle().fill((status?.health ?? .loading).tint).frame(width: 6, height: 6)
+            Text(source.name).font(.caption2)
+            Spacer()
+            Text(freshness).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .help(status?.detail ?? "")
+    }
+
+    private var freshness: String {
+        let updated = status?.lastSuccess.map { "updated " + $0.formatted(.relative(presentation: .named)) }
+        switch status?.health {
+        case .fresh?: return updated ?? "Connected"
+        case .stale?: return ["Stale", updated].compactMap { $0 }.joined(separator: " · ")
+        case .unavailable?: return status?.detail ?? "Unavailable"
+        case .loading?, nil: return updated ?? "Waiting for first run"
+        case let health?: return health.label
+        }
+    }
 }
 
 private struct TotalsRow: View {
-    let totals: ProviderTotals
     let title: String
+    let cells: [(label: String, value: Double)]
+
+    init(title: String, cells: [(label: String, value: Double)]) {
+        self.title = title
+        self.cells = cells
+    }
+
+    init(totals: ProviderTotals, title: String) {
+        self.init(title: title, cells: [("Today", totals.today), ("7 days", totals.sevenDays), ("Lifetime", totals.lifetime)])
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             HStack {
-                TotalCell(label: "Today", value: totals.today)
-                TotalCell(label: "7 days", value: totals.sevenDays)
-                TotalCell(label: "Lifetime", value: totals.lifetime)
+                ForEach(cells, id: \.label) { cell in
+                    TotalCell(label: cell.label, value: cell.value)
+                }
             }
         }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
@@ -160,19 +327,24 @@ private struct TotalCell: View {
     }
 }
 
-private struct ProviderCard: View {
+private struct ProviderCard<Summary: View, Extra: View>: View {
     let snapshot: ProviderSnapshot
-    let totals: ProviderTotals
     let preferences: AppPreferences
+    @ViewBuilder let summary: () -> Summary
+    @ViewBuilder let extra: () -> Extra
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                Circle().fill(snapshot.provider.tint).frame(width: 8, height: 8)
                 Text(snapshot.provider.rawValue).font(.headline)
                 Spacer()
                 Text(snapshot.health.label).font(.caption).foregroundStyle(snapshot.health == .fresh ? .green : .secondary)
             }
             if let detail = snapshot.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
-            TotalsRow(totals: totals, title: snapshot.coverage)
+            summary()
+            if !snapshot.provider.reportsAccountTokens, !snapshot.quotaWindows.isEmpty {
+                Text(snapshot.coverage).font(.caption).foregroundStyle(.secondary)
+            }
             ForEach(snapshot.quotaWindows) { quota in
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
@@ -187,6 +359,7 @@ private struct ProviderCard: View {
                     }
                 }.font(.caption)
             }
+            extra()
         }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
@@ -218,7 +391,7 @@ private struct SevenDayChart: View {
                                     cornerRadius: SevenDayChartLayout.cornerRadius(for: height),
                                     style: .continuous
                                 )
-                                    .fill(snapshot.provider == .codex ? Color.blue : Color.orange)
+                                    .fill(snapshot.provider.tint)
                                     .frame(width: SevenDayChartLayout.barWidth, height: height)
                             }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -236,12 +409,13 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(["General", "Providers", "Data & Privacy"], id: \.self, selection: $selection) { Text($0) }
+            List(["General", "Providers", "Activity Sources", "Data & Privacy"], id: \.self, selection: $selection) { Text($0) }
                 .navigationTitle("QuotaBar")
         } detail: {
             Form {
                 if selection == "General" { general }
                 if selection == "Providers" { providers }
+                if selection == "Activity Sources" { ActivitySourcesSettings(model: model) }
                 if selection == "Data & Privacy" { privacy }
             }.formStyle(.grouped).padding().navigationTitle(selection)
         }.frame(minWidth: 760, minHeight: 510)
@@ -267,6 +441,10 @@ struct SettingsView: View {
             providerControl(.codex, enabled: model.preferences.codexEnabled, protocolDetail: "Signed-in Codex app-server JSON-RPC")
             providerControl(.zcode, enabled: model.preferences.zcodeEnabled, protocolDetail: "Z.ai Coding Plan API; local credential access requires consent")
             Toggle("Allow local ZCode credential discovery", isOn: $model.preferences.zcodeConsent)
+            providerControl(.claude, enabled: model.preferences.claudeEnabled, protocolDetail: "Anthropic OAuth usage endpoint for quota windows; local activity comes from Activity Sources")
+            Toggle("Allow reading Claude Code's sign-in from the Keychain", isOn: $model.preferences.claudeConsent)
+            Text("QuotaBar reads the access token from the “Claude Code-credentials” Keychain item only to request quota windows. It never refreshes, rewrites, stores, or exports it. When the token expires, run Claude Code to sign in again.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -295,7 +473,16 @@ struct SettingsView: View {
             Picker("Day boundary time zone", selection: $model.preferences.timeZoneIdentifier) {
                 ForEach(timeZones, id: \.self) { Text($0).tag($0) }
             }
-            Text("ZCode Lifetime covers account usage from 2025-01-01. Provider timestamps are stored as UTC instants; changing this display boundary does not rewrite the ledger.")
+            Text("ZCode Lifetime covers account usage from 2025-01-01. Provider and activity timestamps are stored as UTC instants; changing this display boundary does not rewrite the ledger.")
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Claude local activity").font(.headline)
+                let sources = model.preferences.activitySources.filter(\.enabled)
+                Text(sources.isEmpty ? "No enabled activity sources." : "Covers " + sources.map { source in
+                    model.activityStatus[source.id]?.device.map { "\(source.name) (\($0))" } ?? source.name
+                }.joined(separator: ", ") + ".")
+                Text("Counted per device from Claude Code transcripts and never added to account totals. Tokens include input, output, cache reads, and cache writes. A session mirrored on several devices is counted once.")
+            }
+            .font(.caption).foregroundStyle(.secondary)
             Divider()
             Text("Provider diagnostics").font(.headline)
             ForEach(ProviderID.allCases) { provider in
@@ -321,8 +508,130 @@ struct SettingsView: View {
                 Button("Export JSON") { Task { try? await model.export(.json) } }
                 Button("Export CSV") { Task { try? await model.export(.csv) } }
             }
-            Text("MCP quota rows are displayed only when reported by the provider. Credentials, prompts, raw responses, and local session logs are neither exported nor stored.")
+            Text("MCP quota rows are displayed only when reported by the provider. Exports include hourly activity counts per source without session ids. Credentials, prompts, raw responses, paths, and local session logs are neither exported nor stored.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct ActivitySourcesSettings: View {
+    @ObservedObject var model: UsageViewModel
+
+    var body: some View {
+        Section {
+            ForEach(model.preferences.activitySources) { source in
+                ActivitySourceEditor(model: model, source: source, status: model.activityStatus[source.id])
+                    .id(source.id)
+            }
+            HStack {
+                Button("Add SSH Source") {
+                    model.addActivitySource(ActivitySourceConfig(id: UUID(), name: "Remote", argv: ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "host", "python3", "-"], enabled: false, pipesCollector: true))
+                }
+                Button("Add Custom Command") {
+                    model.addActivitySource(ActivitySourceConfig(id: UUID(), name: "Custom", argv: [], enabled: false, pipesCollector: false))
+                }
+                Spacer()
+                Button("Refresh All") { Task { await model.refreshActivity() } }
+                    .disabled(model.isRefreshingActivity || !model.preferences.claudeEnabled)
+            }
+        } header: {
+            Text("Claude activity sources")
+        } footer: {
+            Text("Each source is a command run directly, without a shell. With “Pipe bundled collector”, QuotaBar sends its stdlib-only Python collector to the command's standard input and appends --since; for SSH, replace host with your SSH alias. Otherwise the command must print the quotabar.activity JSON schema itself. Apps opened from Finder have a minimal PATH and may not see your shell's SSH agent.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ActivitySourceEditor: View {
+    @ObservedObject var model: UsageViewModel
+    let source: ActivitySourceConfig
+    let status: ActivitySourceStatus?
+    @State private var name: String
+    @State private var command: String
+    @State private var commandError: String?
+
+    init(model: UsageViewModel, source: ActivitySourceConfig, status: ActivitySourceStatus?) {
+        self.model = model
+        self.source = source
+        self.status = status
+        _name = State(initialValue: source.name)
+        _command = State(initialValue: CommandLineSplitter.join(source.argv))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                TextField("Name", text: $name).onSubmit { save() }.font(.headline)
+                Spacer()
+                Circle().fill((status?.health ?? (source.enabled ? .loading : .disabled)).tint).frame(width: 8, height: 8)
+                Text(statusText).font(.caption).foregroundStyle(.secondary)
+            }
+            TextField("Command", text: $command, prompt: Text("python3 -"))
+                .font(.system(.caption, design: .monospaced))
+                .onSubmit { save() }
+            HStack {
+                Toggle("Enabled", isOn: Binding(get: { source.enabled }, set: { enabled in
+                    var updated = source
+                    updated.enabled = enabled
+                    model.updateActivitySource(updated)
+                    if enabled { Task { await model.refreshActivity(only: source.id) } }
+                }))
+                Toggle("Pipe bundled collector", isOn: Binding(get: { source.pipesCollector }, set: { pipes in
+                    var updated = source
+                    updated.pipesCollector = pipes
+                    model.updateActivitySource(updated)
+                }))
+            }.toggleStyle(.checkbox).font(.caption)
+            if let commandError { Text(commandError).font(.caption).foregroundStyle(.red) }
+            if let detail = status?.detail, status?.health != .fresh { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            HStack {
+                Button("Save") { save() }.disabled(!isDirty)
+                Button("Test") {
+                    let id = save()
+                    Task { await model.refreshActivity(only: id) }
+                }.disabled(!source.enabled || model.isRefreshingActivity || !model.preferences.claudeEnabled)
+                Spacer()
+                Button("Remove", role: .destructive) { Task { await model.removeActivitySource(source.id) } }
+            }.controlSize(.small)
+        }
+        .padding(.vertical, 4)
+        .onChange(of: source) { load() }
+    }
+
+    private var isDirty: Bool { name != source.name || command != CommandLineSplitter.join(source.argv) }
+
+    private var statusText: String {
+        guard source.enabled else { return "Disabled" }
+        guard let status else { return "Not run yet" }
+        let device = status.device.map { "\($0) · " } ?? ""
+        let updated = status.lastSuccess.map { $0.formatted(.relative(presentation: .named)) }
+        switch status.health {
+        case .fresh: return device + (updated ?? "Connected")
+        case .loading: return "Running…"
+        default: return device + status.health.label + (updated.map { " · \($0)" } ?? "")
+        }
+    }
+
+    private func load() {
+        name = source.name
+        command = CommandLineSplitter.join(source.argv)
+        commandError = nil
+    }
+
+    /// Saves edits and returns the source's current id.
+    @discardableResult
+    private func save() -> UUID {
+        guard isDirty else { return source.id }
+        guard let argv = CommandLineSplitter.split(command), !argv.isEmpty else {
+            commandError = "Enter a command; quotes must be balanced."
+            return source.id
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        var updated = source
+        updated.name = trimmed.isEmpty ? source.name : trimmed
+        updated.argv = argv
+        commandError = nil
+        return model.updateActivitySource(updated)
     }
 }

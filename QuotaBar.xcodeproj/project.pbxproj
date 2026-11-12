@@ -12,9 +12,13 @@
 		23496451014AE037414EFB1E /* QuotaBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A75A91E64C1F362986369FCF /* QuotaBarTests.swift */; };
 		2DE3CE0CD8E9D54FFFFFC8A2 /* Domain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DED1A4A99946B83D106D75 /* Domain.swift */; };
 		48CAACC670D4A6881C987DD7 /* UsageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2AB03CC480D9FDCB8CAF273 /* UsageViewModel.swift */; };
+		65DCA3C611FB3CE96AAB30A1 /* claude_activity_collector.py in Resources */ = {isa = PBXBuildFile; fileRef = 68641DCC85187AF2D7316D41 /* claude_activity_collector.py */; };
+		99A7BC648E1E52E1D2F74E43 /* Activity.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF8A9374E98041CBA7D39D7 /* Activity.swift */; };
 		CE9A480AC01571F3446D8725 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1C2BF998C4B05A90976532 /* Persistence.swift */; };
+		D6426C8F9A625E47F75748F0 /* ClaudeActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957C7311D1C2003893665710 /* ClaudeActivityTests.swift */; };
 		DDB380458B338A6EC357BE72 /* Providers.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF2C90FB8E8E14FB3F689EB7 /* Providers.swift */; };
 		E72551AE369EC225C25FF584 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08CE99040C0E18B942F6C9E5 /* Views.swift */; };
+		F7357DE6DB4D5E8F0D4775C7 /* ActivityRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 061E4DB3A3F6FFE2B0CCAD8A /* ActivityRunner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,16 +32,20 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		061E4DB3A3F6FFE2B0CCAD8A /* ActivityRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityRunner.swift; sourceTree = "<group>"; };
 		08CE99040C0E18B942F6C9E5 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		11D446F653D48C5733184C36 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		340D75FE53988F42B67F78C3 /* QuotaBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuotaBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		68641DCC85187AF2D7316D41 /* claude_activity_collector.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = claude_activity_collector.py; sourceTree = "<group>"; };
 		8A1C2BF998C4B05A90976532 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		957C7311D1C2003893665710 /* ClaudeActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeActivityTests.swift; sourceTree = "<group>"; };
 		A75A91E64C1F362986369FCF /* QuotaBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaBarTests.swift; sourceTree = "<group>"; };
 		B2AB03CC480D9FDCB8CAF273 /* UsageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViewModel.swift; sourceTree = "<group>"; };
 		B9DED1A4A99946B83D106D75 /* Domain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain.swift; sourceTree = "<group>"; };
 		BD3A9E9CFC9A63E582D886E6 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		BF2C90FB8E8E14FB3F689EB7 /* Providers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Providers.swift; sourceTree = "<group>"; };
 		CB84C086A950F5214F7F5307 /* QuotaBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaBarApp.swift; sourceTree = "<group>"; };
+		EDF8A9374E98041CBA7D39D7 /* Activity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Activity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -53,6 +61,7 @@
 			isa = PBXGroup;
 			children = (
 				BD3A9E9CFC9A63E582D886E6 /* AppIcon.icon */,
+				68641DCC85187AF2D7316D41 /* claude_activity_collector.py */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -86,6 +95,7 @@
 		E636C7B28FDD5FA977B98544 /* QuotaBarTests */ = {
 			isa = PBXGroup;
 			children = (
+				957C7311D1C2003893665710 /* ClaudeActivityTests.swift */,
 				A75A91E64C1F362986369FCF /* QuotaBarTests.swift */,
 			);
 			path = QuotaBarTests;
@@ -94,6 +104,8 @@
 		FBD4E7740B0235589DFD664D /* QuotaBar */ = {
 			isa = PBXGroup;
 			children = (
+				EDF8A9374E98041CBA7D39D7 /* Activity.swift */,
+				061E4DB3A3F6FFE2B0CCAD8A /* ActivityRunner.swift */,
 				B9DED1A4A99946B83D106D75 /* Domain.swift */,
 				8A1C2BF998C4B05A90976532 /* Persistence.swift */,
 				BF2C90FB8E8E14FB3F689EB7 /* Providers.swift */,
@@ -181,6 +193,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				229C41C443DC4A2C6A483D72 /* AppIcon.icon in Resources */,
+				65DCA3C611FB3CE96AAB30A1 /* claude_activity_collector.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -191,6 +204,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D6426C8F9A625E47F75748F0 /* ClaudeActivityTests.swift in Sources */,
 				23496451014AE037414EFB1E /* QuotaBarTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -199,6 +213,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				99A7BC648E1E52E1D2F74E43 /* Activity.swift in Sources */,
+				F7357DE6DB4D5E8F0D4775C7 /* ActivityRunner.swift in Sources */,
 				2DE3CE0CD8E9D54FFFFFC8A2 /* Domain.swift in Sources */,
 				CE9A480AC01571F3446D8725 /* Persistence.swift in Sources */,
 				DDB380458B338A6EC357BE72 /* Providers.swift in Sources */,

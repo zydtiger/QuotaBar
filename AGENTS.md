@@ -2,9 +2,11 @@
 
 ## Purpose
 
-QuotaBar is a native macOS menu bar utility that reports account-based Codex
-and ZCode subscription usage. Preserve account scope, privacy, and truthful
-coverage labels; never replace provider-account totals with device-local logs.
+QuotaBar is a native macOS menu bar utility that reports account-based Codex,
+ZCode, and Claude subscription usage, plus Claude local activity counted from
+Claude Code transcripts on user-configured devices. Preserve account scope,
+privacy, and truthful coverage labels; never replace provider-account totals
+with device-local logs, and never add local activity into account totals.
 
 Read `README.md`, `Docs/PRODUCT.md`, and `Docs/ARCHITECTURE.md` before changing
 behavior or structure.

@@ -25,13 +25,7 @@ enum CodexExecutableResolver {
         isExecutable: (URL) -> Bool = { FileManager.default.isExecutableFile(atPath: $0.path) }
     ) -> URL? {
         if let explicit { return isExecutable(explicit) ? explicit : nil }
-        let pathCandidate = path?
-            .split(separator: ":")
-            .map { URL(fileURLWithPath: String($0)).appending(path: "codex") }
-            .first(where: isExecutable)
-        return pathCandidate ?? ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
-            .map(URL.init(fileURLWithPath:))
-            .first(where: isExecutable)
+        return ExecutableResolver.resolve("codex", path: path, fallbackDirectories: ["/opt/homebrew/bin", "/usr/local/bin"], isExecutable: isExecutable)
     }
 }
 
@@ -380,6 +374,166 @@ struct ZCodeProvider: UsageProvider {
     private func endpoint(_ path: String, baseURL: URL) -> URL {
         ZCodeEndpoint.originEndpoint(baseURL: baseURL, path: path)
     }
+}
+
+struct ClaudeCredential: Sendable {
+    let accessToken: String
+    let expiresAt: Date?
+}
+
+protocol ClaudeCredentialDiscovering: Sendable { func credential() async throws -> ClaudeCredential }
+
+/// Reads Claude Code's OAuth access token from its Keychain item through `/usr/bin/security`,
+/// the access path Claude Code itself uses. Never refreshes, rewrites, or stores the token.
+struct KeychainClaudeCredentialDiscovery: ClaudeCredentialDiscovering {
+    static let service = "Claude Code-credentials"
+    let consent: @Sendable () -> Bool
+    let readItem: @Sendable () async throws -> Data
+
+    init(consent: @escaping @Sendable () -> Bool, readItem: (@Sendable () async throws -> Data)? = nil) {
+        self.consent = consent
+        self.readItem = readItem ?? {
+            let result = try await ProcessCommandRunner().run(
+                executable: URL(fileURLWithPath: "/usr/bin/security"),
+                arguments: ["find-generic-password", "-s", Self.service, "-w"],
+                input: nil,
+                timeout: .seconds(15),
+                outputLimit: 1_048_576
+            )
+            guard result.status == 0 else { throw ProviderError.credentialUnavailable }
+            return result.stdout
+        }
+    }
+
+    func credential() async throws -> ClaudeCredential {
+        try Task.checkCancellation()
+        guard consent() else { throw ProviderError.credentialUnavailable }
+        let data: Data
+        do { data = try await readItem() } catch is CancellationError { throw CancellationError() } catch { throw ProviderError.credentialUnavailable }
+        try Task.checkCancellation()
+        return try Self.parse(data)
+    }
+
+    static func parse(_ data: Data) throws -> ClaudeCredential {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = root["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String, !token.isEmpty else { throw ProviderError.credentialUnavailable }
+        let expiresAt = number(in: oauth, keys: ["expiresAt"]).map { Date(timeIntervalSince1970: $0 / 1_000) }
+        return ClaudeCredential(accessToken: token, expiresAt: expiresAt)
+    }
+}
+
+struct ClaudeProvider: UsageProvider {
+    static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    let id: ProviderID = .claude
+    let credentials: any ClaudeCredentialDiscovering
+    let http: any HTTPClient
+
+    init(credentials: any ClaudeCredentialDiscovering, http: any HTTPClient = URLSessionHTTPClient()) {
+        self.credentials = credentials
+        self.http = http
+    }
+
+    func refresh(now: Date, calendar: Calendar) async throws -> ProviderSnapshot {
+        try Task.checkCancellation()
+        let credential = try await credentials.credential()
+        if let expiresAt = credential.expiresAt, expiresAt <= now { throw ProviderError.authenticationRequired }
+        var request = URLRequest(url: Self.usageURL)
+        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await http.data(for: request)
+        try Task.checkCancellation()
+        switch response.statusCode {
+        case 200..<300: break
+        case 401, 403: throw ProviderError.authenticationRequired
+        default: throw ProviderError.unavailable
+        }
+        return ProviderSnapshot(provider: .claude, dailyUsage: [], lifetimeTokens: 0, quotaWindows: try parseClaudeWindows(data), health: .fresh, updatedAt: now, coverage: "Claude account quota", detail: nil)
+    }
+}
+
+/// The `limits` array lists every active quota window, including model-scoped weekly limits, in display order.
+/// Without it, every top-level object with a `utilization` percentage is a window; null windows are omitted.
+func parseClaudeWindows(_ data: Data) throws -> [QuotaWindow] {
+    guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderError.malformedResponse }
+    switch root["limits"] {
+    case nil, is NSNull:
+        return try parseClaudeTopLevelWindows(root)
+    case let limits as [Any]:
+        guard !limits.isEmpty else { return try parseClaudeTopLevelWindows(root) }
+        var windows: [QuotaWindow] = []
+        for limit in limits {
+            let window = try claudeLimitWindow(limit, existing: windows)
+            windows.append(window)
+        }
+        return windows
+    default:
+        throw ProviderError.malformedResponse
+    }
+}
+
+private func claudeLimitWindow(_ raw: Any, existing: [QuotaWindow]) throws -> QuotaWindow {
+    guard let entry = raw as? [String: Any], let kind = entry["kind"] as? String, !kind.isEmpty,
+          let percent = numeric(entry["percent"]) else { throw ProviderError.malformedResponse }
+    let scope = claudeScopeLabel(entry["scope"])
+    let name: String
+    switch kind {
+    case "session": name = "5-hour"
+    case "weekly_all": name = "Weekly · All models"
+    default:
+        let base = (entry["group"] as? String) == "weekly" ? "Weekly" : claudeWords(Substring(kind))
+        name = [base, scope].compactMap { $0 }.joined(separator: " · ")
+    }
+    var id = ["claude", kind, scope?.lowercased()].compactMap { $0 }.joined(separator: "-")
+    if existing.contains(where: { $0.id == id }) { id += "-\(existing.count)" }
+    return QuotaWindow(id: id, name: name, used: percent, limit: 100, resetAt: try claudeResetDate(entry["resets_at"]), unit: "% used")
+}
+
+/// A scoped limit names its model or surface; either may be an object with `display_name` or a plain string.
+private func claudeScopeLabel(_ raw: Any?) -> String? {
+    guard let scope = raw as? [String: Any] else { return nil }
+    for key in ["model", "surface"] {
+        if let text = scope[key] as? String, !text.isEmpty { return text }
+        if let object = scope[key] as? [String: Any], let text = object["display_name"] as? String, !text.isEmpty { return text }
+    }
+    return nil
+}
+
+private func claudeResetDate(_ raw: Any?) throws -> Date? {
+    guard let raw, !(raw is NSNull) else { return nil }
+    guard let text = raw as? String,
+          let date = InstantFormat.fractional.date(from: text) ?? InstantFormat.plain.date(from: text) else { throw ProviderError.malformedResponse }
+    return date
+}
+
+private func parseClaudeTopLevelWindows(_ root: [String: Any]) throws -> [QuotaWindow] {
+    var windows: [QuotaWindow] = []
+    for key in root.keys.sorted(by: { claudeWindowRank($0) < claudeWindowRank($1) }) {
+        guard let window = root[key] as? [String: Any], let rawUtilization = window["utilization"] else { continue }
+        if rawUtilization is NSNull { continue }
+        guard let utilization = numeric(rawUtilization) else { throw ProviderError.malformedResponse }
+        windows.append(QuotaWindow(id: "claude-\(key)", name: claudeWindowName(key), used: utilization, limit: 100, resetAt: try claudeResetDate(window["resets_at"]), unit: "% used"))
+    }
+    return windows
+}
+
+private func claudeWords(_ text: Substring) -> String {
+    text.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+}
+
+private func claudeWindowRank(_ key: String) -> (Int, String) {
+    if key == "five_hour" { return (0, key) }
+    if key == "seven_day" { return (1, key) }
+    if key.hasPrefix("seven_day_") { return (2, key) }
+    return (3, key)
+}
+
+private func claudeWindowName(_ key: String) -> String {
+    if key == "five_hour" { return "5-hour" }
+    if key == "seven_day" { return "Weekly · All models" }
+    if key.hasPrefix("seven_day_") { return "Weekly · \(claudeWords(key.dropFirst("seven_day_".count)))" }
+    return claudeWords(Substring(key))
 }
 
 enum ZCodeEndpoint {

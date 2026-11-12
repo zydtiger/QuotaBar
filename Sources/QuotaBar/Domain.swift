@@ -3,8 +3,12 @@ import Foundation
 enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable {
     case codex = "Codex"
     case zcode = "ZCode"
+    case claude = "Claude"
 
     var id: String { rawValue }
+
+    /// Whether the provider reports account token totals that belong in the aggregate.
+    var reportsAccountTokens: Bool { self != .claude }
 }
 
 enum ProviderHealth: String, Codable, Sendable {
@@ -57,6 +61,10 @@ struct ProviderSnapshot: Codable, Sendable, Equatable {
     let updatedAt: Date
     let coverage: String
     let detail: String?
+
+    static func loading(_ provider: ProviderID, now: Date = .now) -> ProviderSnapshot {
+        ProviderSnapshot(provider: provider, dailyUsage: [], lifetimeTokens: 0, quotaWindows: [], health: .loading, updatedAt: now, coverage: "Waiting for account data", detail: nil)
+    }
 
     static func disabled(_ provider: ProviderID, now: Date = .now) -> ProviderSnapshot {
         ProviderSnapshot(provider: provider, dailyUsage: [], lifetimeTokens: 0, quotaWindows: [], health: .disabled, updatedAt: now, coverage: "Disabled", detail: nil)
@@ -136,7 +144,7 @@ enum UsageMath {
     }
 
     static func aggregate(_ snapshots: [ProviderSnapshot], enabled: (ProviderID) -> Bool, now: Date, calendar: Calendar) -> ProviderTotals {
-        snapshots.filter { enabled($0.provider) }.map { totals(for: $0, now: now, calendar: calendar) }
+        snapshots.filter { enabled($0.provider) && $0.provider.reportsAccountTokens }.map { totals(for: $0, now: now, calendar: calendar) }
             .reduce(ProviderTotals(today: 0, sevenDays: 0, lifetime: 0)) { partial, next in
                 ProviderTotals(today: partial.today + next.today, sevenDays: partial.sevenDays + next.sevenDays, lifetime: partial.lifetime + next.lifetime)
             }
@@ -163,24 +171,26 @@ enum UsageExport {
         snapshots.filter { preferences.enabled($0.provider) }.sorted { $0.provider.rawValue < $1.provider.rawValue }
     }
 
-    static func records(_ snapshots: [ProviderSnapshot], preferences: AppPreferences, now: Date) -> [UsageExportRecord] {
-        self.snapshots(snapshots, preferences: preferences).flatMap { snapshot in
-            let totals = UsageMath.totals(for: snapshot, now: now, calendar: preferences.calendar)
+    static func records(_ snapshots: [ProviderSnapshot], preferences: AppPreferences, now: Date, activity: [ActivityExportSource] = []) -> [UsageExportRecord] {
+        let account = self.snapshots(snapshots, preferences: preferences).flatMap { snapshot in
+            let totals = snapshot.provider.reportsAccountTokens ? UsageMath.totals(for: snapshot, now: now, calendar: preferences.calendar) : nil
             let metadata = UsageExportRecord.snapshot(snapshot, totals: totals)
             let daily = snapshot.dailyUsage.map { UsageExportRecord.daily($0, snapshot: snapshot) }
             let quotas = snapshot.quotaWindows.map { UsageExportRecord.quota($0, snapshot: snapshot) }
             return [metadata] + daily + quotas
         }
+        guard preferences.claudeEnabled else { return account }
+        return account + activity.flatMap(UsageExportRecord.activity)
     }
 
-    static func json(_ snapshots: [ProviderSnapshot], preferences: AppPreferences, now: Date = .now) throws -> Data {
+    static func json(_ snapshots: [ProviderSnapshot], preferences: AppPreferences, now: Date = .now, activity: [ActivityExportSource] = []) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(records(snapshots, preferences: preferences, now: now))
+        return try encoder.encode(records(snapshots, preferences: preferences, now: now, activity: activity))
     }
 
-    static func csv(_ snapshots: [ProviderSnapshot], preferences: AppPreferences, now: Date) -> Data {
-        let rows = [UsageExportRecord.csvHeader] + records(snapshots, preferences: preferences, now: now).map(\.csvRow)
+    static func csv(_ snapshots: [ProviderSnapshot], preferences: AppPreferences, now: Date, activity: [ActivityExportSource] = []) -> Data {
+        let rows = [UsageExportRecord.csvHeader] + records(snapshots, preferences: preferences, now: now, activity: activity).map(\.csvRow)
         return Data(rows.joined(separator: "\n").utf8)
     }
 }
@@ -189,6 +199,17 @@ enum UsageExportRowType: String, Codable, Sendable, Hashable {
     case snapshot
     case dailyUsage
     case quotaWindow
+    case activity
+}
+
+/// One activity source's deduplicated rows prepared for export, without session ids.
+struct ActivityExportSource: Sendable, Equatable {
+    let name: String
+    let device: String
+    let generatedAt: Date
+    let health: ProviderHealth
+    let metrics: [String: ActivityMetricInfo]
+    let rows: [ActivityRow]
 }
 
 struct UsageExportRecord: Codable, Sendable, Hashable {
@@ -210,9 +231,13 @@ struct UsageExportRecord: Codable, Sendable, Hashable {
     let quotaLimit: Double?
     let quotaResetAt: Date?
     let quotaUnit: String?
+    var metric: String? = nil
+    var labels: String? = nil
+    var value: Double? = nil
+    var unit: String? = nil
 
-    static func snapshot(_ snapshot: ProviderSnapshot, totals: ProviderTotals) -> UsageExportRecord {
-        UsageExportRecord(rowType: .snapshot, provider: snapshot.provider, updatedAt: snapshot.updatedAt, health: snapshot.health, coverage: snapshot.coverage, detail: snapshot.detail, today: totals.today, sevenDays: totals.sevenDays, lifetime: totals.lifetime, day: nil, dateLabel: nil, tokens: nil, quotaID: nil, quotaName: nil, quotaUsed: nil, quotaLimit: nil, quotaResetAt: nil, quotaUnit: nil)
+    static func snapshot(_ snapshot: ProviderSnapshot, totals: ProviderTotals?) -> UsageExportRecord {
+        UsageExportRecord(rowType: .snapshot, provider: snapshot.provider, updatedAt: snapshot.updatedAt, health: snapshot.health, coverage: snapshot.coverage, detail: snapshot.detail, today: totals?.today, sevenDays: totals?.sevenDays, lifetime: totals?.lifetime, day: nil, dateLabel: nil, tokens: nil, quotaID: nil, quotaName: nil, quotaUsed: nil, quotaLimit: nil, quotaResetAt: nil, quotaUnit: nil)
     }
 
     static func daily(_ daily: DailyUsage, snapshot: ProviderSnapshot) -> UsageExportRecord {
@@ -223,10 +248,24 @@ struct UsageExportRecord: Codable, Sendable, Hashable {
         UsageExportRecord(rowType: .quotaWindow, provider: snapshot.provider, updatedAt: snapshot.updatedAt, health: snapshot.health, coverage: snapshot.coverage, detail: snapshot.detail, today: nil, sevenDays: nil, lifetime: nil, day: nil, dateLabel: nil, tokens: nil, quotaID: quota.id, quotaName: quota.name, quotaUsed: quota.used, quotaLimit: quota.limit, quotaResetAt: quota.resetAt, quotaUnit: quota.unit)
     }
 
-    static let csvHeader = "row_type,provider,updated_at,health,coverage,detail,today,seven_days,lifetime,day,date_label,tokens,quota_id,quota_name,quota_used,quota_limit,quota_reset_at,quota_unit"
+    /// Hourly activity sums per metric and labels; session ids are not exported.
+    static func activity(_ source: ActivityExportSource) -> [UsageExportRecord] {
+        struct Key: Hashable { let metric: String; let bucket: Date; let labels: [String: String] }
+        let sums = source.rows.reduce(into: [Key: Double]()) { $0[Key(metric: $1.metric, bucket: $1.bucket, labels: $1.labels), default: 0] += $1.value }
+        let coverage = "Local activity: \(source.name) (\(source.device))"
+        return sums.sorted { ($0.key.bucket, $0.key.metric, labelText($0.key.labels)) < ($1.key.bucket, $1.key.metric, labelText($1.key.labels)) }.map { key, value in
+            UsageExportRecord(rowType: .activity, provider: .claude, updatedAt: source.generatedAt, health: source.health, coverage: coverage, detail: nil, today: nil, sevenDays: nil, lifetime: nil, day: key.bucket, dateLabel: nil, tokens: nil, quotaID: nil, quotaName: nil, quotaUsed: nil, quotaLimit: nil, quotaResetAt: nil, quotaUnit: nil, metric: key.metric, labels: labelText(key.labels), value: value, unit: source.metrics[key.metric]?.unit)
+        }
+    }
+
+    private static func labelText(_ labels: [String: String]) -> String {
+        labels.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ";")
+    }
+
+    static let csvHeader = "row_type,provider,updated_at,health,coverage,detail,today,seven_days,lifetime,day,date_label,tokens,quota_id,quota_name,quota_used,quota_limit,quota_reset_at,quota_unit,metric,labels,value,unit"
 
     var csvRow: String {
-        [rowType.rawValue, provider.rawValue, iso(updatedAt), health.rawValue, coverage, detail ?? "", number(today), number(sevenDays), number(lifetime), day.map(iso) ?? "", dateLabel ?? "", number(tokens), quotaID ?? "", quotaName ?? "", number(quotaUsed), number(quotaLimit), quotaResetAt.map(iso) ?? "", quotaUnit ?? ""].map(csvField).joined(separator: ",")
+        [rowType.rawValue, provider.rawValue, iso(updatedAt), health.rawValue, coverage, detail ?? "", number(today), number(sevenDays), number(lifetime), day.map(iso) ?? "", dateLabel ?? "", number(tokens), quotaID ?? "", quotaName ?? "", number(quotaUsed), number(quotaLimit), quotaResetAt.map(iso) ?? "", quotaUnit ?? "", metric ?? "", labels ?? "", number(value), unit ?? ""].map(csvField).joined(separator: ",")
     }
 
     private func number(_ value: Double?) -> String { value.map { String($0) } ?? "" }
@@ -245,6 +284,9 @@ struct AppPreferences: Codable, Sendable, Equatable {
     var zcodeConsent = false
     var warningThreshold = 0.8
     var criticalThreshold = 0.95
+    var claudeEnabled = true
+    var claudeConsent = false
+    var activitySources: [ActivitySourceConfig] = [.thisMac]
 
     var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -252,7 +294,21 @@ struct AppPreferences: Codable, Sendable, Equatable {
         return calendar
     }
 
-    func enabled(_ provider: ProviderID) -> Bool { provider == .codex ? codexEnabled : zcodeEnabled }
+    func enabled(_ provider: ProviderID) -> Bool {
+        switch provider {
+        case .codex: codexEnabled
+        case .zcode: zcodeEnabled
+        case .claude: claudeEnabled
+        }
+    }
+
+    mutating func setEnabled(_ enabled: Bool, for provider: ProviderID) {
+        switch provider {
+        case .codex: codexEnabled = enabled
+        case .zcode: zcodeEnabled = enabled
+        case .claude: claudeEnabled = enabled
+        }
+    }
 
     mutating func setWarningThreshold(_ value: Double) {
         warningThreshold = min(max(value, 0), criticalThreshold)
@@ -296,4 +352,7 @@ extension Double {
         if self >= 1_000 { return String(format: "%.1fK", self / 1_000) }
         return String(format: "%.0f", self)
     }
+
+    /// Whole counts such as messages; compact only from ten thousand.
+    var countText: String { self >= 10_000 ? tokenText : String(format: "%.0f", self) }
 }
