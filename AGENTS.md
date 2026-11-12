@@ -6,7 +6,9 @@ QuotaBar is a native macOS menu bar utility that reports account-based Codex,
 ZCode, and Claude subscription usage, plus Claude local activity counted from
 Claude Code transcripts on user-configured devices. Preserve account scope,
 privacy, and truthful coverage labels; never replace provider-account totals
-with device-local logs, and never add local activity into account totals.
+with device-local logs, and count each provider from exactly one source: account
+tokens where the provider reports them, local activity only for Claude. The
+panel's combined total sums those headlines and labels local contributions.
 
 Read `README.md`, `Docs/PRODUCT.md`, and `Docs/ARCHITECTURE.md` before changing
 behavior or structure.

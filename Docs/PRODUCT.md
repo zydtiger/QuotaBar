@@ -14,10 +14,11 @@ QuotaBar reports two classes of metric that are never mixed:
 - **Local activity** is counted per device from Claude Code transcripts on the
   devices the user configures as activity sources: tokens per day, user
   messages per day, and any further metric a source reports. It is always
-  labelled with the devices it covers and is never added into account totals,
-  the aggregate, or presented as an account total. Claude subscription accounts
-  expose no account-level token or message history, so local activity is the
-  only Claude usage history the app shows.
+  labelled with the devices it covers, is never added into a provider's
+  account totals, and is never presented as an account total. Claude
+  subscription accounts expose no account-level token or message history, so
+  local activity is the only Claude usage history the app shows and is Claude's
+  headline token source.
 
 Local storage is a cache and normalized ledger for provider-account results and
 per-source activity counts.
@@ -33,28 +34,36 @@ minimum height, up to 620 points high. Taller content scrolls within that limit.
 From top to bottom it contains:
 
 1. Header, account-scope status, refresh status, and Settings action.
-2. Account-token aggregate Today, 7 days, and Lifetime for enabled Codex and
-   ZCode, titled with the providers it sums.
+2. Combined total Today, 7 days, and 30 days across enabled providers, titled
+   with the providers it sums and marking local contributions, such as
+   `All tokens · Codex + Claude (local)`.
 3. Codex provider card.
 4. ZCode provider card.
 5. Claude provider card.
-6. Paired seven-day account-token chart for Codex and ZCode.
+6. Seven-day token chart with one bar per enabled provider per day.
 7. Chart legend, explicit Quit QuotaBar action, and manual refresh.
 
-Codex and ZCode cards contain connection health, every quota window returned by
-the provider, and Today, 7 days, and Lifetime account tokens. The Claude card
-uses the same layout: connection health, a local-token row with Today, 7 days,
-and 30 days titled with the enabled devices it covers, every quota window
-returned by the provider, and a Local activity section with user messages for
-the same periods and each device's freshness. Disabled providers are fully
-removed and excluded from the aggregate.
+Every provider card uses the same layout: connection health; when the provider
+is not fresh, its recovery detail as a warning line with an icon, orange for
+stale and red for unavailable or sign-in required; a token row; a
+`<Provider> account quota` caption; every quota window the provider returns;
+and provider-specific details. Codex and
+ZCode token rows show Today, 7 days, and Lifetime account tokens. The Claude
+token row shows local tokens for Today, 7 days, and 30 days titled with the
+enabled devices it covers, and its details are a Local activity section with
+user messages and each device's freshness. Disabled providers are fully removed
+and excluded from the combined total and chart.
 
 The Claude local-token figure sums input, output, cache-read, and cache-write
-tokens from every enabled activity source, counting a mirrored session once.
-A caption under it breaks today's figure into output, cache read, and cache
-write. Local activity starts with a 30-day backfill, so the card shows 30 days
-instead of Lifetime, and the figure stays out of the account-token aggregate
-and the seven-day account chart.
+tokens from every enabled activity source, counting a mirrored session once;
+exports keep the per-component rows. Local activity starts with a 30-day backfill, so the card shows 30 days
+instead of Lifetime.
+
+Each provider enters the combined total and the chart from exactly one source:
+account daily buckets for Codex and ZCode, local activity for Claude. Device
+logs are never collected for a provider that reports account tokens, because
+its account figure already covers every device and client, and two sources for
+one provider would double count.
 
 Token totals use compact `K`, `M`, and `B` units; values at or above one
 billion use `B` so large account totals do not widen or crowd the cards.
@@ -228,10 +237,11 @@ history and its old rows are deleted.
   timezone never rewrites historical usage.
 - Codex Lifetime is the provider-reported account lifetime estimate.
 - ZCode Lifetime is the cached account total beginning 2025-01-01.
-- Aggregate values sum only enabled Codex and ZCode account tokens. Claude
-  quota windows and local activity never enter the aggregate.
+- The combined total sums each enabled provider's headline daily tokens: Codex
+  and ZCode account buckets and Claude local activity. Claude quota windows and
+  Claude account snapshots never enter it.
 - Quota percentages and MCP calls are never added to token totals.
-- Local activity Today and 7-day values use the same day boundary and cover
+- Local activity Today, 7-day, and 30-day values use the same day boundary and cover
   only enabled sources; the covered devices are always shown with them.
 - Show the ZCode lifetime boundary in Settings and explanatory UI while the
   panel label remains `Lifetime`.
@@ -257,7 +267,7 @@ timestamp. Never replace an error with zero usage.
 - ZCode parsing recognizes 5-hour, weekly, and MCP limits.
 - Historical ZCode months are requested once, cached, sealed, and recovered
   safely after interruption.
-- Today, 7-day, Lifetime, and enabled-provider aggregate calculations have unit
+- Today, 7-day, Lifetime, 30-day, and combined-total calculations have unit
   tests, including day-boundary behavior.
 - Claude quota parsing handles missing, null, and unknown windows, and renders
   any weekly per-model window the provider reports.
@@ -268,7 +278,7 @@ timestamp. Never replace an error with zero usage.
   or unreachable source keeps its prior rows as stale.
 - A session mirrored on one device and native on another is counted once.
 - Activity day totals follow the configured day boundary.
-- Local activity never enters the account aggregate.
+- Each provider contributes one source to the combined total and the chart.
 - Sources can be added, edited, removed, enabled, and tested in Settings and
   persist with preferences.
 - Exports include account snapshots and per-source activity counts, without

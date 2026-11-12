@@ -182,8 +182,8 @@ final class ActivityTests: XCTestCase {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(identifier: "UTC")!
         // Headline tokens sum every component; the 30-day window starts Oct 13 local, after the oldest row.
-        XCTAssertEqual(ActivityMath.totals(rows, metric: "tokens", now: now, calendar: newYork), ActivityTotals(today: 1_010, sevenDays: 1_011, thirtyDays: 1_111))
-        XCTAssertEqual(ActivityMath.totals(rows, metric: "tokens", now: now, calendar: utc), ActivityTotals(today: 1_010, sevenDays: 1_010, thirtyDays: 1_111))
+        XCTAssertEqual(ActivityMath.totals(rows, metric: "tokens", now: now, calendar: newYork), PeriodTotals(today: 1_010, sevenDays: 1_011, thirtyDays: 1_111))
+        XCTAssertEqual(ActivityMath.totals(rows, metric: "tokens", now: now, calendar: utc), PeriodTotals(today: 1_010, sevenDays: 1_010, thirtyDays: 1_111))
         XCTAssertEqual(ActivityMath.totals(rows, metric: "tokens", components: ["cache_read"], now: now, calendar: newYork).today, 1_000)
     }
 
@@ -307,7 +307,7 @@ final class ActivityTests: XCTestCase {
         XCTAssertFalse(refreshing)
     }
 
-    func testActivityNeverEntersAccountAggregateOrExportTotals() async throws {
+    func testHeadlineUsesOneSourcePerProviderAndExportsKeepActivitySeparate() async throws {
         let store = InMemoryUsageStore()
         let runner = ScriptedRunner(results: [.success(CommandResult(status: 0, stdout: document(["rows": [row(value: 500, bucket: hourString(Date.now))]]), stderr: Data()))])
         let collector = ActivityCollector(runner: runner, collectorScript: Data(), resolve: { URL(fileURLWithPath: "/bin/\($0)") })
@@ -320,8 +320,13 @@ final class ActivityTests: XCTestCase {
         }
         await model.loadCachedSnapshots()
         await model.refreshActivity()
-        let aggregate = await MainActor.run { model.aggregate }
-        XCTAssertEqual(aggregate, ProviderTotals(today: 10, sevenDays: 10, lifetime: 100))
+        // Codex contributes account buckets and Claude local activity; Claude's snapshot buckets are ignored.
+        let series = await MainActor.run { model.headlineSeries }
+        XCTAssertEqual(series.map(\.provider), [.codex, .claude])
+        XCTAssertEqual(series.map { UsageMath.periodTotals($0.values) }, [
+            PeriodTotals(today: 10, sevenDays: 10, thirtyDays: 10),
+            PeriodTotals(today: 500, sevenDays: 500, thirtyDays: 500),
+        ])
 
         let records = UsageExport.records([codex, claude], preferences: AppPreferences(zcodeEnabled: false), now: .now, activity: [
             ActivityExportSource(name: "This Mac", device: "fixture-host", generatedAt: .now, health: .fresh, metrics: ["tokens": ActivityMetricInfo(label: "Tokens", unit: "tokens")], rows: [

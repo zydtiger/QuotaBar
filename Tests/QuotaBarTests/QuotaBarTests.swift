@@ -26,8 +26,14 @@ final class QuotaBarTests: XCTestCase {
             XCTAssertTrue(scrollView.autohidesScrollers)
             XCTAssertEqual(scrollView.scrollerInsets.top, 16)
             XCTAssertEqual(scrollView.scrollerInsets.bottom, 16)
-            XCTAssertEqual(scrollView.scrollerInsets.right, 1)
+            XCTAssertEqual(scrollView.scrollerInsets.right, 0)
             XCTAssertEqual(scrollView.verticalScroller?.controlSize, .mini)
+            XCTAssertTrue(scrollView.verticalScroller is SoftScroller)
+            let scroller = scrollView.verticalScroller
+            ScrollbarAppearance.apply(to: scrollView)
+            XCTAssertTrue(scrollView.verticalScroller === scroller)
+            let knob = SoftScroller.knobRect(in: NSRect(x: 0, y: 0, width: 11, height: 300), track: NSRect(x: 4, y: 20, width: 1, height: 80))
+            XCTAssertEqual(knob, NSRect(x: 3, y: 22, width: 6, height: 76))
         }
     }
 
@@ -71,7 +77,9 @@ final class QuotaBarTests: XCTestCase {
         let codex = snapshot(.codex, daily: [DailyUsage(day: .now, tokens: 10)], lifetime: 100)
         let zcode = snapshot(.zcode, daily: [DailyUsage(day: .now, tokens: 20)], lifetime: 200)
         let preferences = AppPreferences(zcodeEnabled: false)
-        XCTAssertEqual(UsageMath.aggregate([codex, zcode], enabled: preferences.enabled, now: .now, calendar: .current), ProviderTotals(today: 10, sevenDays: 10, lifetime: 100))
+        let series = UsageMath.headlineSeries([codex, zcode], localRows: nil, enabled: preferences.enabled, days: 30, now: .now, calendar: .current)
+        XCTAssertEqual(series.map(\.provider), [.codex])
+        XCTAssertEqual(UsageMath.periodTotals(series[0].values), PeriodTotals(today: 10, sevenDays: 10, thirtyDays: 10))
         let json = try UsageExport.json([zcode, codex], preferences: preferences)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601

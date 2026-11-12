@@ -184,7 +184,7 @@ enum InstantFormat {
     }()
 }
 
-struct ActivityTotals: Equatable, Sendable {
+struct PeriodTotals: Equatable, Sendable {
     let today: Double
     let sevenDays: Double
     let thirtyDays: Double
@@ -234,12 +234,12 @@ enum ActivityMath {
         }
     }
 
-    static func totals(_ rows: [ActivityRow], metric: String, components: Set<String>? = nil, now: Date, calendar: Calendar) -> ActivityTotals {
+    static func totals(_ rows: [ActivityRow], metric: String, components: Set<String>? = nil, now: Date, calendar: Calendar) -> PeriodTotals {
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         let weekStart = calendar.date(byAdding: .day, value: -6, to: today)!
         let monthStart = calendar.date(byAdding: .day, value: -29, to: today)!
-        return ActivityTotals(
+        return PeriodTotals(
             today: total(rows, metric: metric, components: components, from: today, to: tomorrow),
             sevenDays: total(rows, metric: metric, components: components, from: weekStart, to: tomorrow),
             thirtyDays: total(rows, metric: metric, components: components, from: monthStart, to: tomorrow)

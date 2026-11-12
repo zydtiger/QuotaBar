@@ -32,8 +32,10 @@ timeout, cancellation, and an output limit, and validates the
 `quotabar.activity` schema strictly before anything is stored. Activity rows
 are keyed by source, metric, UTC hour bucket, session, and labels. Cross-source
 deduplication by session id and day-boundary arithmetic live in the
-normalization layer; activity values never reach provider snapshots or the
-account aggregate. The runner contains no host names or transport-specific
+normalization layer; activity values never reach provider snapshots. The
+normalization layer builds each provider's headline daily series from one
+source, account buckets or Claude local activity, for the combined total and
+the chart. The runner contains no host names or transport-specific
 logic; SSH is only one possible user-entered command.
 
 The persistence layer owns schema creation, atomic replacement of mutable

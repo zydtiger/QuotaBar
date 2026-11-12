@@ -39,13 +39,44 @@ enum SettingsPresenter {
 
 @MainActor
 enum ScrollbarAppearance {
-    static let insets = NSEdgeInsets(top: 16, left: 0, bottom: 16, right: 1)
+    static let insets = NSEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
 
+    /// Idempotent: SwiftUI calls this on every update, and reassigning the style or scroller
+    /// resets the overlay scroller's show/hide state, which made the knob fail to appear.
     static func apply(to scrollView: NSScrollView) {
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerInsets = insets
-        scrollView.verticalScroller?.controlSize = .mini
+        if !(scrollView.verticalScroller is SoftScroller) {
+            scrollView.verticalScroller = SoftScroller()
+        }
+        if scrollView.scrollerStyle != .overlay { scrollView.scrollerStyle = .overlay }
+        if !scrollView.autohidesScrollers { scrollView.autohidesScrollers = true }
+        let current = scrollView.scrollerInsets
+        if current.top != insets.top || current.bottom != insets.bottom || current.right != insets.right || current.left != insets.left {
+            scrollView.scrollerInsets = insets
+        }
+        if scrollView.verticalScroller?.controlSize != .mini { scrollView.verticalScroller?.controlSize = .mini }
+    }
+}
+
+/// A slim neutral knob without a track, pinned near the panel's right edge and matched to the
+/// card borders instead of the system's dark knob.
+final class SoftScroller: NSScroller {
+    static let knobWidth: CGFloat = 6
+    static let edgeGap: CGFloat = 2
+
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
+
+    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {}
+
+    override func drawKnob() {
+        let knob = Self.knobRect(in: bounds, track: rect(for: .knob))
+        guard knob.height > 0 else { return }
+        NSColor.secondaryLabelColor.withAlphaComponent(0.4).setFill()
+        NSBezierPath(roundedRect: knob, xRadius: knob.width / 2, yRadius: knob.width / 2).fill()
+    }
+
+    /// Fixed width regardless of the system's knob rect, so the knob never collapses to a sliver.
+    static func knobRect(in bounds: NSRect, track: NSRect) -> NSRect {
+        NSRect(x: bounds.maxX - knobWidth - edgeGap, y: track.minY + 2, width: knobWidth, height: max(0, track.height - 4))
     }
 }
 
@@ -104,8 +135,17 @@ struct MenuPanel: View {
                     }
                     .buttonStyle(.borderless)
                 }
-                if !accountTokenProviders.isEmpty {
-                    TotalsRow(totals: model.aggregate, title: "Account tokens · " + accountTokenProviders.map(\.rawValue).joined(separator: " + "))
+                let series = model.headlineSeries
+                if !series.isEmpty {
+                    let combined = UsageMath.periodTotals(series.map(\.values).reduce(into: Array(repeating: 0.0, count: 30)) { sum, values in
+                        for index in sum.indices { sum[index] += values[index] }
+                    })
+                    TotalsRow(
+                        title: "All tokens · " + series.map { $0.provider.reportsAccountTokens ? $0.provider.rawValue : "\($0.provider.rawValue) (local)" }.joined(separator: " + "),
+                        cells: [("Today", combined.today), ("7 days", combined.sevenDays), ("30 days", combined.thirtyDays)]
+                    )
+                    .padding(2)
+                    .cardSurface()
                 }
                 ForEach(ProviderID.allCases) { provider in
                     // Claude's card also carries local activity, so it shows before its first account poll.
@@ -115,18 +155,26 @@ struct MenuPanel: View {
                                 LocalActivityTotals(model: model)
                             } else {
                                 TotalsRow(totals: UsageMath.totals(for: snapshot, now: .now, calendar: model.preferences.calendar), title: snapshot.coverage)
+                                    .tinted(provider.tint)
                             }
                         } extra: {
                             if provider == .claude { LocalActivitySection(model: model) }
                         }
                     }
                 }
-                if !accountTokenProviders.isEmpty {
-                    SevenDayChart(snapshots: model.enabledSnapshots.filter(\.provider.reportsAccountTokens), calendar: model.preferences.calendar)
+                if !series.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SevenDayChart(series: series.map { ChartSeries(provider: $0.provider, values: Array($0.values.suffix(7))) })
+                        HStack(spacing: 12) {
+                            ForEach(series, id: \.provider) { line in
+                                Text("● \(line.provider.rawValue)").foregroundStyle(line.provider.tint)
+                            }
+                        }.font(.caption)
+                    }
+                    .padding(12)
+                    .cardSurface()
                 }
                 HStack {
-                    if model.preferences.codexEnabled { Text("● Codex").foregroundStyle(ProviderID.codex.tint) }
-                    if model.preferences.zcodeEnabled { Text("● ZCode").foregroundStyle(ProviderID.zcode.tint) }
                     Spacer()
                     Button("Quit QuotaBar") { ApplicationActions.quit() }
                     Button("Refresh") { Task { await model.refresh() } }.disabled(model.isRefreshing)
@@ -141,13 +189,31 @@ struct MenuPanel: View {
             .background(OverlayScrollerConfigurator())
         }
         .frame(width: 380)
+        .background(Color.panelBase)
         .frame(height: contentHeight.map { min($0, 620) })
         .frame(maxHeight: 620)
         .task { await model.panelOpened() }
     }
 
-    private var accountTokenProviders: [ProviderID] {
-        ProviderID.allCases.filter { $0.reportsAccountTokens && model.preferences.enabled($0) }
+}
+
+extension Color {
+    /// A soft cool-gray base in light mode so white cards stand out; the system window color in dark mode.
+    static let panelBase = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .windowBackgroundColor
+            : NSColor(srgbRed: 0.925, green: 0.93, blue: 0.945, alpha: 1)
+    })
+}
+
+extension View {
+    /// The panel's only surface: an opaque card on the window background, so nothing behind the
+    /// menu bar panel bleeds through and nested blocks never stack shades of gray.
+    func cardSurface() -> some View {
+        background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+            .shadow(color: .black.opacity(0.09), radius: 10, y: 4)
     }
 }
 
@@ -172,15 +238,6 @@ extension ProviderHealth {
     }
 }
 
-extension UsageViewModel {
-    /// Rows of enabled activity sources, already deduplicated across devices.
-    var enabledActivityRows: [ActivityRow] {
-        enabledActivitySources.flatMap { activityRows[$0.id] ?? [] }
-    }
-
-    var enabledActivitySources: [ActivitySourceConfig] { preferences.activitySources.filter(\.enabled) }
-}
-
 /// Claude's headline: local tokens from every enabled device, in the same layout as account totals.
 private struct LocalActivityTotals: View {
     @ObservedObject var model: UsageViewModel
@@ -189,19 +246,11 @@ private struct LocalActivityTotals: View {
         let calendar = model.preferences.calendar
         let rows = model.enabledActivityRows
         let tokens = ActivityMath.totals(rows, metric: ActivityMath.tokens, now: .now, calendar: calendar)
-        let today = { (component: String) in
-            ActivityMath.totals(rows, metric: ActivityMath.tokens, components: [component], now: .now, calendar: calendar).today.tokenText
-        }
-        VStack(alignment: .leading, spacing: 4) {
-            TotalsRow(
-                title: "Local tokens · " + (model.enabledActivitySources.isEmpty ? "no devices" : model.enabledActivitySources.map(\.name).joined(separator: " + ")),
-                cells: [("Today", tokens.today), ("7 days", tokens.sevenDays), ("30 days", tokens.thirtyDays)]
-            )
-            if !model.enabledActivitySources.isEmpty {
-                Text("Input, output, and cache. Today: \(today("output")) output, \(today("cache_read")) cache read, \(today("cache_creation")) cache write.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }
+        TotalsRow(
+            title: "Local tokens · " + (model.enabledActivitySources.isEmpty ? "no devices" : model.enabledActivitySources.map(\.name).joined(separator: " + ")),
+            cells: [("Today", tokens.today), ("7 days", tokens.sevenDays), ("30 days", tokens.thirtyDays)]
+        )
+        .tinted(ProviderID.claude.tint)
     }
 }
 
@@ -214,6 +263,7 @@ private struct LocalActivitySection: View {
         let rows = model.enabledActivityRows
         let messages = ActivityMath.totals(rows, metric: ActivityMath.userMessages, now: .now, calendar: calendar)
         VStack(alignment: .leading, spacing: 6) {
+            Divider()
             HStack {
                 Text("Local activity").font(.caption.weight(.semibold))
                 Spacer()
@@ -241,8 +291,6 @@ private struct LocalActivitySection: View {
                 }
             }
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var enabledSources: [ActivitySourceConfig] { model.enabledActivitySources }
@@ -255,7 +303,7 @@ private struct LocalActivitySection: View {
         model.activityStatus[source.id]?.device.map { $0 == source.name ? $0 : "\(source.name) (\($0))" } ?? source.name
     }
 
-    private func activityRow(_ label: String, _ totals: ActivityTotals, unit: KeyPath<Double, String>) -> some View {
+    private func activityRow(_ label: String, _ totals: PeriodTotals, unit: KeyPath<Double, String>) -> some View {
         GridRow {
             Text(label).font(.caption)
             Text(totals.today[keyPath: unit]).font(.callout.monospacedDigit().weight(.semibold))
@@ -312,7 +360,12 @@ private struct TotalsRow: View {
                     TotalCell(label: cell.label, value: cell.value)
                 }
             }
-        }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        }.padding(10)
+    }
+
+    /// Provider token rows sit on a light wash of the provider's color instead of another gray layer.
+    func tinted(_ color: Color) -> some View {
+        background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -338,12 +391,15 @@ private struct ProviderCard<Summary: View, Extra: View>: View {
                 Circle().fill(snapshot.provider.tint).frame(width: 8, height: 8)
                 Text(snapshot.provider.rawValue).font(.headline)
                 Spacer()
-                Text(snapshot.health.label).font(.caption).foregroundStyle(snapshot.health == .fresh ? .green : .secondary)
+                Text(snapshot.health.label).font(.caption).foregroundStyle(snapshot.health.tint)
             }
-            if let detail = snapshot.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            if let detail = snapshot.detail, snapshot.health != .fresh {
+                Label(detail, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(snapshot.health.tint)
+            }
             summary()
-            if !snapshot.provider.reportsAccountTokens, !snapshot.quotaWindows.isEmpty {
-                Text(snapshot.coverage).font(.caption).foregroundStyle(.secondary)
+            if !snapshot.quotaWindows.isEmpty {
+                Text("\(snapshot.provider.rawValue) account quota").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(snapshot.quotaWindows) { quota in
                 VStack(alignment: .leading, spacing: 3) {
@@ -360,7 +416,7 @@ private struct ProviderCard<Summary: View, Extra: View>: View {
                 }.font(.caption)
             }
             extra()
-        }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }.padding(12).cardSurface()
     }
 
     private func tint(for quota: QuotaWindow) -> Color {
@@ -373,25 +429,22 @@ private struct ProviderCard<Summary: View, Extra: View>: View {
 }
 
 private struct SevenDayChart: View {
-    let snapshots: [ProviderSnapshot]
-    let calendar: Calendar
+    let series: [ChartSeries]
     var body: some View {
         VStack(alignment: .leading) {
-            Text("7-day provider tokens").font(.caption).foregroundStyle(.secondary)
+            Text("7-day tokens").font(.caption).foregroundStyle(.secondary)
             GeometryReader { proxy in
-                let maximum = max(1, snapshots.flatMap(\.dailyUsage).map(\.tokens).max() ?? 1)
+                let maximum = max(1, series.flatMap(\.values).max() ?? 1)
                 HStack(alignment: .bottom, spacing: SevenDayChartLayout.daySpacing) {
                     ForEach(0..<7, id: \.self) { index in
-                        let date = calendar.date(byAdding: .day, value: index - 6, to: calendar.startOfDay(for: .now))!
                         HStack(alignment: .bottom, spacing: SevenDayChartLayout.providerSpacing) {
-                            ForEach(snapshots, id: \.provider) { snapshot in
-                                let value = UsageMath.tokens(for: snapshot, on: date, calendar: calendar)
-                                let height = max(2, proxy.size.height * value / maximum)
+                            ForEach(series, id: \.provider) { line in
+                                let height = max(2, proxy.size.height * line.values[index] / maximum)
                                 RoundedRectangle(
                                     cornerRadius: SevenDayChartLayout.cornerRadius(for: height),
                                     style: .continuous
                                 )
-                                    .fill(snapshot.provider.tint)
+                                    .fill(line.provider.tint)
                                     .frame(width: SevenDayChartLayout.barWidth, height: height)
                             }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)

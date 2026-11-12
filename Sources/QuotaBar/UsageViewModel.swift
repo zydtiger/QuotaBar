@@ -86,12 +86,23 @@ final class UsageViewModel: ObservableObject {
         notificationTask?.cancel()
     }
 
-    var enabledSnapshots: [ProviderSnapshot] {
-        ProviderID.allCases.compactMap { snapshots[$0] }.filter { preferences.enabled($0.provider) }
+    var enabledActivitySources: [ActivitySourceConfig] { preferences.activitySources.filter(\.enabled) }
+
+    /// Rows of enabled activity sources, already deduplicated across devices.
+    var enabledActivityRows: [ActivityRow] {
+        enabledActivitySources.flatMap { activityRows[$0.id] ?? [] }
     }
 
-    var aggregate: ProviderTotals {
-        UsageMath.aggregate(Array(snapshots.values), enabled: preferences.enabled, now: .now, calendar: preferences.calendar)
+    /// Each enabled provider's headline tokens for the last 30 days, oldest first.
+    var headlineSeries: [ChartSeries] {
+        UsageMath.headlineSeries(
+            Array(snapshots.values),
+            localRows: enabledActivitySources.isEmpty ? nil : enabledActivityRows,
+            enabled: preferences.enabled,
+            days: 30,
+            now: .now,
+            calendar: preferences.calendar
+        )
     }
 
     func appStarted() async {

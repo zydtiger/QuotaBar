@@ -143,12 +143,34 @@ enum UsageMath {
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
 
-    static func aggregate(_ snapshots: [ProviderSnapshot], enabled: (ProviderID) -> Bool, now: Date, calendar: Calendar) -> ProviderTotals {
-        snapshots.filter { enabled($0.provider) && $0.provider.reportsAccountTokens }.map { totals(for: $0, now: now, calendar: calendar) }
-            .reduce(ProviderTotals(today: 0, sevenDays: 0, lifetime: 0)) { partial, next in
-                ProviderTotals(today: partial.today + next.today, sevenDays: partial.sevenDays + next.sevenDays, lifetime: partial.lifetime + next.lifetime)
+    /// Headline daily tokens per enabled provider for the `days` calendar days ending today, oldest first:
+    /// account buckets for providers that report account tokens, local activity for Claude (nil rows when
+    /// no activity source is enabled). Each provider contributes one source, so nothing is counted twice.
+    static func headlineSeries(_ snapshots: [ProviderSnapshot], localRows: [ActivityRow]?, enabled: (ProviderID) -> Bool, days: Int, now: Date, calendar: Calendar) -> [ChartSeries] {
+        let today = calendar.startOfDay(for: now)
+        let dates = (0..<days).map { calendar.date(byAdding: .day, value: $0 - days + 1, to: today)! }
+        return ProviderID.allCases.compactMap { provider in
+            guard enabled(provider) else { return nil }
+            if provider.reportsAccountTokens {
+                guard let snapshot = snapshots.first(where: { $0.provider == provider }) else { return nil }
+                return ChartSeries(provider: provider, values: dates.map { tokens(for: snapshot, on: $0, calendar: calendar) })
             }
+            guard let localRows else { return nil }
+            return ChartSeries(provider: provider, values: dates.map { day in
+                ActivityMath.total(localRows, metric: ActivityMath.tokens, from: day, to: calendar.date(byAdding: .day, value: 1, to: day)!)
+            })
+        }
     }
+
+    /// Today, 7-day, and 30-day sums of daily values ordered oldest first and ending today.
+    static func periodTotals(_ daily: [Double]) -> PeriodTotals {
+        PeriodTotals(today: daily.last ?? 0, sevenDays: daily.suffix(7).reduce(0, +), thirtyDays: daily.suffix(30).reduce(0, +))
+    }
+}
+
+struct ChartSeries: Equatable {
+    let provider: ProviderID
+    let values: [Double]
 }
 
 struct BackoffPolicy: Sendable, Equatable {

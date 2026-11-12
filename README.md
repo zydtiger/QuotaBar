@@ -4,17 +4,18 @@
 
 QuotaBar is a native macOS menu bar utility for Codex, ZCode, and Claude
 subscription usage. It shows provider quota windows; Today, 7-day, and Lifetime
-account token totals for Codex and ZCode with their aggregate; and Claude local
-activity (tokens and user messages per day) counted from Claude Code
-transcripts on the devices you configure. Local activity is always labelled
-with the devices it covers and never added into account totals.
+account token totals for Codex and ZCode; Claude local activity (tokens and user
+messages per day) counted from Claude Code transcripts on the devices you
+configure; and a combined total and seven-day chart across enabled providers.
+Local activity is always labelled with the devices it covers, and each provider
+is counted from one source only, so nothing is counted twice.
 
 ## Usage and privacy
 
 Open the menu bar panel to refresh account data and use its Settings action (or
 Command-comma) for provider controls, refresh behavior, timezone day boundary,
 launch at login, and JSON/CSV export. Disabled providers stop polling and are
-excluded from aggregate totals.
+excluded from the combined total and chart.
 
 Codex is read through the signed-in `codex app-server` process. ZCode access is
 opt-in: the app only discovers the enabled local Coding Plan configuration in
